@@ -17,4 +17,4 @@ venv/
 
 
 # Model File (Downloaded)
-**/models/model.tflite
+**/models/**_model.tflite

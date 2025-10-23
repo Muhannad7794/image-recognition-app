@@ -1,0 +1,43 @@
+{
+    "info": {
+        "name": "Image Classification (Office-Home)",
+        "description": "Transfer learning model based on MobileNetV2 for classifying office/home objects.",
+        "author": "Your Name",
+        "version": "1.0.0",
+        "image": "path/to/optional/icon.png",
+        "organizationOnly": true
+    },
+    "neuralNetwork": {
+        "image": {
+            "input": [
+                "width",
+                "height",
+                "channels"
+            ],
+            "output": [
+                "classes"
+            ]
+        }
+    },
+    "training": {
+        "arguments": [
+            {
+                "name": "epochs",
+                "type": "int",
+                "label": "Number of epochs",
+                "defaultValue": 20,
+                "minimum": 1,
+                "category": "training"
+            },
+            {
+                "name": "learning_rate",
+                "type": "float",
+                "label": "Learning rate",
+                "defaultValue": 0.0005,
+                "minimum": 0.00001,
+                "maximum": 0.1,
+                "category": "training"
+            }
+        ]
+    }
+}
