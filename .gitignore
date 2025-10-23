@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+# Environment variables
+.env
+
+# Docker
+.dockerignore
+
+# Django
+**/db.sqlite3
+**/media/
+**/staticfiles/
+**/logs/
+**/*.log
+
+
+# Model File (Downloaded)
+**/models/model.tflite
