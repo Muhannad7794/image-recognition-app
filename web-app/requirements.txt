@@ -2,6 +2,11 @@
 django
 djangorestframework
 drf-spectacular
+
+#python
+python-dotenv
+requests
+
 # ML
 tflite-runtime
 numpy
