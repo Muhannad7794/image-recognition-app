@@ -1,0 +1,15 @@
+services:
+  web:
+    build:
+      context: ./web-app
+      dockerfile: Dockerfile
+    container_name: web-app-container
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./web-app:/web-app-dockerized
+    env_file:
+      - ./web-app/.env
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"

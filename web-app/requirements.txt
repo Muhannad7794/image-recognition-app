@@ -1,0 +1,9 @@
+# Django
+django
+djangorestframework
+drf-spectacular
+# ML
+tflite-runtime
+numpy
+pandas
+pillow
