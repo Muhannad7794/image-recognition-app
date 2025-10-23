@@ -1,7 +1,11 @@
 # web-app/classifier/urls.py
+from rest_framework.routers import DefaultRouter
+from .views import ClassificationViewSet
 
-from django.urls import path
+# Create a router and register our viewset with it.
+router = DefaultRouter()
+router.register(r"v1", ClassificationViewSet, basename="classification")
 
-urlpatterns = [
-    # We will add our API endpoints here in the next step
-]
+# The API URLs are now determined automatically by the router.
+# This will create the '/api/v1/classify/' endpoint.
+urlpatterns = router.urls
