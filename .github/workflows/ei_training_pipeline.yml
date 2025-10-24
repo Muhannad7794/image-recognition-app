@@ -44,6 +44,6 @@ jobs:
         run: |
           edge-impulse-blocks push ./learning-block \
             --api-key ${{ secrets.EI_API_KEY }} \
-            --organization-id ${{ secrets.EI_ORG_ID }}
+            # --organization-id ${{ secrets.EI_ORG_ID }}
         env:
           EDGE_IMPULSE_API_KEY: ${{ secrets.EI_API_KEY }}
