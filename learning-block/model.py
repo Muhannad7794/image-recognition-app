@@ -25,7 +25,7 @@ print(f"Loading data from directory: {args.data_directory}")
 try:
     x_train_path = os.path.join(args.data_directory, "X_train_features.npy")
     y_train_path = os.path.join(
-        args.data_directory, "Y_train.npy"
+        args.data_directory, "y_train.npy"
     )  
     x_val_path = os.path.join(
         args.data_directory, "X_validate_features.npy"
