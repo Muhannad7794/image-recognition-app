@@ -28,10 +28,10 @@ try:
         args.data_directory, "y_train.npy"
     )  
     x_val_path = os.path.join(
-        args.data_directory, "X_validate_features.npy"
+        args.data_directory, "X_split_test.npy"
     )  
     y_val_path = os.path.join(
-        args.data_directory, "Y_validate.npy"
+        args.data_directory, "Y_split_test.npy"
     )
 
     print(f"Loading training features: {x_train_path}")
