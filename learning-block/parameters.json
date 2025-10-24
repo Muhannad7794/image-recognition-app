@@ -1,11 +1,13 @@
 {
+    "version": 1,
+    "type": "machine-learning",
     "info": {
-        "name": "Image Classification (Office-Home)",
-        "description": "Transfer learning model based on MobileNetV2 for classifying office/home objects.",
-        "author": "Your Name",
-        "version": "1.0.0",
-        "image": "path/to/optional/icon.png",
-        "organizationOnly": true
+        "name": "Model Training Block",
+        "description": "Transfer learning model based on MobileNetV2 to classify images of home office objects based on a Kaggle dataset.",
+        "operatesOn": "image",
+        "imageInputScaling": "0..1",
+        "indRequiresGpu": true,
+        "repositoryUrl": "https://github.com/Muhannad7794/image-recognition-app"
     },
     "neuralNetwork": {
         "image": {
