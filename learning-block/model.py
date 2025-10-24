@@ -20,15 +20,44 @@ parser.add_argument("--out-directory", type=str, required=True)
 args, unknown = parser.parse_known_args()
 
 # --- Load Data Info from Edge Impulse ---
+print(f"Received data directory: {args.data_directory}")
+print("Files in data directory:")
 try:
-    with open(os.path.join(args.data_directory, "X_train_features.json")) as f:
+    for filename in os.listdir(args.data_directory):
+        print(f"- {filename}")
+except Exception as e:
+    print(f"  Error listing directory: {e}")
+# --------------------------------------------------------
+
+# --- Load Data Info ---
+# Edge Impulse provides data info in JSON files
+try:
+    # Construct full paths using os.path.join
+    train_features_path = os.path.join(args.data_directory, "X_train_features.json")
+    train_labels_path = os.path.join(args.data_directory, "Y_train.json")
+    val_features_path = os.path.join(args.data_directory, "X_validate_features.json")
+    val_labels_path = os.path.join(args.data_directory, "Y_validate.json")
+
+    print(f"Attempting to load: {train_features_path}")  # Debug print
+    with open(train_features_path) as f:
         train_info = json.load(f)
-    with open(os.path.join(args.data_directory, "Y_train.json")) as f:
+
+    print(f"Attempting to load: {train_labels_path}")  # Debug print
+    with open(train_labels_path) as f:
         train_labels_info = json.load(f)
-    with open(os.path.join(args.data_directory, "X_validate_features.json")) as f:
+
+    print(f"Attempting to load: {val_features_path}")  # Debug print
+    with open(val_features_path) as f:
         val_info = json.load(f)
-    with open(os.path.join(args.data_directory, "Y_validate.json")) as f:
+
+    print(f"Attempting to load: {val_labels_path}")  # Debug print
+    with open(val_labels_path) as f:
         val_labels_info = json.load(f)
+
+except FileNotFoundError as e:
+    print(f"\nError: File not found. Make sure feature generation was completed.")
+    print(f"Details: {e}")
+    sys.exit(1)
 except Exception as e:
     print(f"Error loading data info JSON: {e}")
     sys.exit(1)
