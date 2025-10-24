@@ -17,7 +17,7 @@ parser.add_argument("--epochs", type=int, required=True)
 parser.add_argument("--learning-rate", type=float, required=True)
 parser.add_argument("--out-directory", type=str, required=True)
 
-args = parser.parse_args()
+args, unknown = parser.parse_known_args()
 
 # --- Load Data Info from Edge Impulse ---
 try:
