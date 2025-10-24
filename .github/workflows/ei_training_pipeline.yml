@@ -23,11 +23,21 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18' # Use a recent LTS version
+          node-version: '18'
 
       # Step 3: Install the Edge Impulse CLI
       - name: Install Edge Impulse CLI
         run: npm install -g edge-impulse-cli
+
+      # Debug step to check .ei-block-config location
+      - name: Check for config file
+        run: |
+          echo "Listing files in root:"
+          ls -a .
+          echo "Listing files in learning-block directory:"
+          ls -a ./learning-block
+          echo "Contents of .ei-block-config:"
+          cat ./learning-block/.ei-block-config
 
       # Step 4: Push the custom block to Edge Impulse
       - name: Push Custom Learning Block
