@@ -41,8 +41,9 @@ jobs:
 
       # Step 4: Push the custom block to Edge Impulse
       - name: Push Custom Learning Block
+        working-directory: ./learning-block
         run: |
-          edge-impulse-blocks push ./learning-block \
+          edge-impulse-blocks push . \
             --api-key ${{ secrets.EI_API_KEY }} \
             # --organization-id ${{ secrets.EI_ORG_ID }}
         env:
