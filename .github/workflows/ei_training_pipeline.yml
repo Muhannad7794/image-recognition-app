@@ -1,14 +1,13 @@
 # .github/workflows/ei_training_pipeline.yml
 name: Push Edge Impulse Block
 
-# Run this workflow only on pushes to the train branch
+# Run this workflow only on pushes to the master branch
 on:
   push:
     branches:
-      - train
+      - master
     paths: # Only run if files in the learning block directory change
       - 'learning-block/**'
-  workflow_dispatch: # Allows manual triggering from GitHub UI
 
 jobs:
   push-block:
@@ -29,22 +28,11 @@ jobs:
       - name: Install Edge Impulse CLI
         run: npm install -g edge-impulse-cli
 
-      # Debug step to check .ei-block-config location
-      - name: Check for config file
-        run: |
-          echo "Listing files in root:"
-          ls -a .
-          echo "Listing files in learning-block directory:"
-          ls -a ./learning-block
-          echo "Contents of .ei-block-config:"
-          cat ./learning-block/.ei-block-config
-
       # Step 4: Push the custom block to Edge Impulse
       - name: Push Custom Learning Block
         working-directory: ./learning-block
         run: |
           edge-impulse-blocks push . \
             --api-key ${{ secrets.EI_API_KEY }} \
-            # --organization-id ${{ secrets.EI_ORG_ID }}
         env:
           EDGE_IMPULSE_API_KEY: ${{ secrets.EI_API_KEY }}

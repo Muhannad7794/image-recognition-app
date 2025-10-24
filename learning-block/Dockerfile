@@ -14,4 +14,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # run the model
-ENTRYPOINT ["python3"]
+ENTRYPOINT ["python3", "model.py"]
