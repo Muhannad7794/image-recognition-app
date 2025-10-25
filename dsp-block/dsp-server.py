@@ -8,11 +8,13 @@ from socketserver import ThreadingMixIn
 from urllib.parse import urlparse
 import numpy as np
 
-from dsp import generate_features  # <-- your function in dsp.py
+from dsp import generate_features
 
 
 def _read_parameters_json():
-    with open("parameters.json", "r", encoding="utf-8") as f:
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "parameters.json")
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
