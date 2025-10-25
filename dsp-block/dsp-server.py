@@ -5,6 +5,8 @@ from socketserver import ThreadingMixIn
 from urllib.parse import urlparse
 import numpy as np
 
+print("[BOOT] starting server module import", flush=True)
+
 from dsp import generate_features 
 
 HERE = os.path.dirname(os.path.abspath(__file__))

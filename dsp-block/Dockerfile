@@ -11,10 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Expose Port 80
+# Expose Port
 ENV HOST=0.0.0.0
-ENV PORT=80
+ENV PORT=4446
 ENV PYTHONUNBUFFERED=1
-EXPOSE 80
+EXPOSE 4446
 
 ENTRYPOINT ["python3", "-u", "dsp-server.py"]
