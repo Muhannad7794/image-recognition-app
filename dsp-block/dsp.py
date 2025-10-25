@@ -11,30 +11,70 @@ parser = argparse.ArgumentParser(description="Custom Image Preprocessor(OpenCV)"
 parser.add_argument(
     "--features-out",
     type=str,
-    required=True,
-    help="Output file for the features (e.g., features.npy)",
+    help="Output file for features (e.g., features.npy)",
 )
 parser.add_argument(
     "--draw-graphs-out",
     type=str,
-    required=True,
     help="Output directory for graphs (unused here)",
 )
 parser.add_argument(
     "--info-out",
     type=str,
-    required=True,
     help="Output file for block info (e.g., info.json)",
 )
-parser.add_argument(
-    "--in-file", type=str, required=True, help="Input file path (e.g., image.jpg)"
-)
+parser.add_argument("--in-file", type=str, help="Input file path (e.g., image.jpg)")
 
 # Custom arguments from parameters.json
-parser.add_argument("--img_width", type=int, required=True, help="Target image width")
-parser.add_argument("--img_height", type=int, required=True, help="Target image height")
+parser.add_argument("--img_width", type=int, help="Target image width")
+parser.add_argument("--img_height", type=int, help="Target image height")
 
 args, unknown = parser.parse_known_args()
+
+# --- MANUAL Argument Check ---
+# Check if essential arguments were provided (needed for actual processing)
+# The info-out is needed even for validation checks, so handle its absence carefully.
+if not args.info_out:
+    print("Error: --info-out argument is missing.", file=sys.stderr)
+    # Cannot write error status without info_out path
+    sys.exit(1)
+
+required_args_for_processing = ["features_out", "in_file", "img_width", "img_height"]
+missing_args = [
+    arg
+    for arg in required_args_for_processing
+    if getattr(args, arg.replace("-", "_")) is None
+]
+
+# If running for real processing and arguments are missing, write error and exit
+if (
+    missing_args and args.in_file
+):  # Check if in_file is present as a proxy for real execution
+    error_message = f"Error: Missing required arguments: {', '.join(missing_args)}"
+    print(error_message, file=sys.stderr)
+    info = {"success": False, "error": error_message, "warnings": []}
+    try:
+        with open(args.info_out, "w") as f:
+            json.dump(info, f)
+    except Exception as write_e:
+        print(f"Failed to write error info: {write_e}", file=sys.stderr)
+    sys.exit(1)
+# If arguments are missing BUT in_file isn't provided, assume it's a validation check and exit cleanly.
+elif missing_args and not args.in_file:
+    print("Validation check detected (missing --in-file). Exiting cleanly.")
+    info = {
+        "success": True,
+        "warnings": ["Validation check mode - no processing performed."],
+    }
+    try:
+        with open(args.info_out, "w") as f:
+            json.dump(info, f)
+    except Exception as write_e:
+        print(
+            f"Failed to write info during validation check: {write_e}", file=sys.stderr
+        )
+        # Still exit cleanly
+    sys.exit(0)
 
 # --- Image Processing ---
 try:
