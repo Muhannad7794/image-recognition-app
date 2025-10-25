@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
-WORKDIR /dsp-block-dockerized
+WORKDIR /dsp-block
 
 
 # Copy requirements and install Python dependencies
