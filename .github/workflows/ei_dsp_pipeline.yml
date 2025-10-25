@@ -1,0 +1,37 @@
+# .github/workflows/ei_dsp_pipeline.yml
+name: Push Edge Impulse DSP Block
+
+on:
+  push:
+    branches:
+      - dsp 
+    paths: # Only run if files in the DSP block directory change
+      - 'dsp_block/**'
+
+jobs:
+  push-dsp-block:
+    runs-on: ubuntu-latest # Use a standard Linux runner
+
+    steps:
+      # Step 1: Check out your repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      # Step 3: Install the Edge Impulse CLI
+      - name: Install Edge Impulse CLI
+        run: npm install -g edge-impulse-cli
+
+      # Step 4: Push the custom DSP block to Edge Impulse
+      - name: Push Custom DSP Block
+        working-directory: ./dsp_block
+        run: |
+          edge-impulse-blocks push . \
+            --api-key ${{ secrets.EI_API_KEY }}
+        env:
+          EDGE_IMPULSE_API_KEY: ${{ secrets.EI_API_KEY }}
