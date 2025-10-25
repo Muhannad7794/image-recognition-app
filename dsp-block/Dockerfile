@@ -16,10 +16,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the content to the container
 COPY . .
 
-# Ensure the server uses port 80 and listens on all interfaces
+# Server env: listen on all interfaces; **use 4446** (EI default)
 ENV HOST=0.0.0.0
-ENV PORT=80
-EXPOSE 80
+ENV PORT=4446
+ENV PYTHONUNBUFFERED=1
 
-# Define the entrypoint for the Edge Impulse runner
-ENTRYPOINT ["python3", "dsp-server.py"]
+EXPOSE 4446
+
+# Unbuffered Python (-u) so logs appear immediately
+ENTRYPOINT ["python3", "-u", "dsp-server.py"]
