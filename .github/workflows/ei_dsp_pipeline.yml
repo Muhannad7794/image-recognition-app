@@ -6,7 +6,7 @@ on:
     branches:
       - dsp 
     paths: # Only run if files in the DSP block directory change
-      - 'dsp_block/**'
+      - 'dsp-block/**'
 
 jobs:
   push-dsp-block:
