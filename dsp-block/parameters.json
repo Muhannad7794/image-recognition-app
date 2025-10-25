@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "type": "dsp",
   "info": {
     "title": "Custom Image Preprocessor (OpenCV)",
     "author": "Your Name",
@@ -7,6 +8,12 @@
     "name": "OpenCV Preprocessor",
     "cppType": "opencv_image_preprocessor",
     "latestImplementationVersion": 1
+  },
+    "dsp": {
+    "image": {
+      "input": ["width", "height", "channels"],
+      "output": ["features"]
+    }
   },
   "parameters": [
     {
