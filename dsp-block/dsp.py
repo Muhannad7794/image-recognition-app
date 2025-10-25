@@ -1,5 +1,5 @@
 # dsp_block/dsp.py
-import cv2  # OpenCV
+import cv2  # OpenCV11
 import numpy as np
 import json
 import argparse
