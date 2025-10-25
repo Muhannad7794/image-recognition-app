@@ -1,5 +1,5 @@
 # dsp_block/dsp.py
-import cv2  # OpenCV11
+import cv2  # OpenCV
 import numpy as np
 import json
 import argparse
@@ -7,7 +7,7 @@ import sys
 import os
 
 # Handle arguments passed by Edge Impulse runner
-parser = argparse.ArgumentParser(description="Custom Image Preprocessor")
+parser = argparse.ArgumentParser(description="Custom Image Preprocessor(OpenCV)")
 parser.add_argument(
     "--features-out",
     type=str,
