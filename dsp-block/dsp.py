@@ -1,153 +1,197 @@
-# dsp_block/dsp.py
-import cv2  # OpenCV
+# dsp.py
+# Server-facing processing function for Edge Impulse custom DSP blocks.
+# Exposes: generate_features(...)
+#
+# Notes:
+# - Edge Impulse's dsp-server.py will import and call generate_features.
+# - Parameters from parameters.json are provided as kwargs with hyphens
+#   converted to underscores (e.g., "img-width" -> img_width).
+
+from typing import Any, Dict, List, Tuple
 import numpy as np
-import json
-import argparse
-import sys
-import os
+import cv2
 
-# Handle arguments passed by Edge Impulse runner
-parser = argparse.ArgumentParser(description="Custom Image Preprocessor(OpenCV)")
-parser.add_argument(
-    "--features-out",
-    type=str,
-    help="Output file for features (e.g., features.npy)",
-)
-parser.add_argument(
-    "--draw-graphs-out",
-    type=str,
-    help="Output directory for graphs (unused here)",
-)
-parser.add_argument(
-    "--info-out",
-    type=str,
-    help="Output file for block info (e.g., info.json)",
-)
-parser.add_argument("--in-file", type=str, help="Input file path (e.g., image.jpg)")
 
-# Custom arguments from parameters.json
-parser.add_argument("--img_width", type=int, help="Target image width")
-parser.add_argument("--img_height", type=int, help="Target image height")
+# ---------- Utilities ----------
 
-args, unknown = parser.parse_known_args()
 
-# --- MANUAL Argument Check ---
-required_args_for_processing = [
-    "features_out",
-    "in_file",
-    "img_width",
-    "img_height",
-    "info_out",
-    "draw_graphs_out",
-]
-missing_args = [
-    arg
-    for arg in required_args_for_processing
-    if getattr(args, arg.replace("-", "_")) is None
-]
-
-# Check if --in-file is provided. If not, assume it's a validation check.
-if args.in_file is None:
-    print("Validation check detected (missing --in-file). Attempting clean exit.")
-    info = {
-        "success": True,
-        "warnings": ["Validation check mode - no processing performed."],
-    }
-
-    # Define default info_out path if not provided by runner
-    info_out_path = (
-        args.info_out if args.info_out else "./info.json"
-    )  # Default to current dir
-
-    # ALWAYS try to write info.json
+def _as_int(name: str, value: Any, lo: int = 1, hi: int = 8192) -> int:
     try:
-        with open(info_out_path, "w") as f:
-            json.dump(info, f)
-        print(f"Successfully wrote validation info to {info_out_path}")
-    except Exception as write_e:
-        # If writing fails even during validation, print error but still exit cleanly
-        print(
-            f"Warning: Failed to write info.json during validation check: {write_e}",
-            file=sys.stderr,
-        )
+        iv = int(value)
+    except Exception:
+        raise ValueError(f"Parameter '{name}' must be an integer, got: {value!r}")
+    if not (lo <= iv <= hi):
+        raise ValueError(f"Parameter '{name}' out of range [{lo},{hi}]: {iv}")
+    return iv
 
-    # Exit cleanly regardless of whether info.json could be written
-    sys.exit(0)
 
-# If --in-file *is* provided, it's a real processing job. Check ALL required args.
-elif missing_args:
-    # ... (error handling for real job - check info_out exists before writing) ...
-    error_message = f"Error: Real processing job detected, but missing required arguments: {', '.join(missing_args)}"
-    print(error_message, file=sys.stderr)
-    if args.info_out:  # Check if path exists
-        info = {"success": False, "error": error_message, "warnings": []}
-        try:
-            with open(args.info_out, "w") as f:
-                json.dump(info, f)
-        except Exception as write_e:
-            print(f"Failed to write error info: {write_e}", file=sys.stderr)
+def _infer_channels(axes: List[str] | None, raw_len: int) -> int:
+    """Infer channels from axes or fall back to divisibility heuristics."""
+    if axes:
+        # Common EI conventions: ['r','g','b'] or ['px'] / ['grayscale']
+        a = [str(x).lower() for x in axes]
+        if {"r", "g", "b"}.issubset(set(a)):
+            return 3
+        if any(x in {"px", "gray", "grey", "grayscale"} for x in a) and len(a) == 1:
+            return 1
+        # If axes length is 1 or 3, assume that's channels
+        if len(a) in (1, 3):
+            return len(a)
+
+    # Fallback: prefer RGB if divisible by 3
+    if raw_len % 3 == 0:
+        return 3
+    return 1
+
+
+def _best_wh_from_pixels(pixels: int) -> Tuple[int, int]:
+    """
+    Heuristic: pick H,W from factor pairs of 'pixels' that best match common aspect ratios.
+    This is only used if width/height were not provided.
+    """
+    # Collect factor pairs
+    pairs: List[Tuple[int, int]] = []
+    r = int(np.sqrt(pixels))
+    for h in range(1, r + 1):
+        if pixels % h == 0:
+            w = pixels // h
+            pairs.append((h, w))
+
+    if not pairs:
+        # Fallback to square
+        s = int(np.sqrt(pixels))
+        return max(1, s), max(1, s)
+
+    # Score pairs by closeness to target ratios & by compactness
+    targets = [1.0, 4 / 3, 16 / 9, 3 / 4, 9 / 16]
+
+    def score(hw: Tuple[int, int]) -> float:
+        h, w = hw
+        ratio = w / h
+        aspect_err = min(abs(ratio - t) for t in targets)
+        # Slight preference for larger heights (to avoid tiny numbers)
+        return aspect_err + 1e-6 * (1 / h)
+
+    best = min(pairs, key=score)
+    return best
+
+
+def _ensure_float01(arr: np.ndarray) -> np.ndarray:
+    """Convert an array to float32 in [0,1] from either [0,255] uint8 or already [0,1]."""
+    a = arr.astype(np.float32)
+    if a.max() > 1.5:
+        a = a / 255.0
+    # Clip for safety
+    return np.clip(a, 0.0, 1.0)
+
+
+# ---------- Main hook called by EI server ----------
+
+
+def generate_features(
+    implementation_version: int,
+    draw_graphs: bool,
+    raw_data: List[float] | np.ndarray,
+    axes: List[str] | None,
+    sampling_freq: float | None,
+    img_width: int | None = None,
+    img_height: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    channels: int | None = None,
+    input_width: int | None = None,
+    input_height: int | None = None,
+    input_channels: int | None = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    """
+    Edge Impulse dsp-server will pass the raw signal and parameters here.
+    We return a dict: { features, graphs, fft_used, output_config }.
+
+    Parameters expected from parameters.json:
+      - img_width (int)
+      - img_height (int)
+
+    Optional (may be present depending on EI pipeline):
+      - width/height/channels OR input_width/input_height/input_channels
+    """
+
+    # ---- Read target size from parameters.json ----
+    if img_width is None and "img-width" in kwargs:  # just in case
+        img_width = kwargs["img-width"]
+    if img_height is None and "img-height" in kwargs:
+        img_height = kwargs["img-height"]
+
+    Wt = _as_int("img_width", img_width)
+    Ht = _as_int("img_height", img_height)
+
+    # ---- Flatten & basic info ----
+    raw = np.asarray(raw_data)
+    if raw.ndim > 1:
+        flat = raw.reshape(-1)
     else:
-        print(
-            "Error: Cannot write error status because --info-out is missing.",
-            file=sys.stderr,
-        )
-    sys.exit(1)
+        flat = raw
 
-# If --in-file is present AND no arguments are missing, proceed.
-else:
-    print("All required arguments found. Proceeding with image processing.")
+    # ---- Determine input channels (prefer explicit) ----
+    Cin = channels or input_channels or _infer_channels(axes, flat.size)
+    if Cin not in (1, 3):
+        # Guard against odd axes specs; normalize to 3 if plausible
+        Cin = 3 if flat.size % 3 == 0 else 1
 
-# --- Image Processing ---
-try:
-    # 1. Load the image using OpenCV
-    # cv2.IMREAD_COLOR loads as BGR by default
-    img = cv2.imread(args.in_file, cv2.IMREAD_COLOR)
-    if img is None:
-        raise ValueError(f"Could not read image file: {args.in_file}")
+    # ---- Determine input W,H (prefer explicit) ----
+    Win = width or input_width
+    Hin = height or input_height
 
-    print(f"Original image shape: {img.shape}")
+    if Win is None or Hin is None:
+        # Infer from flattened length and channels
+        if flat.size % Cin != 0:
+            raise ValueError(
+                f"Incoming data length {flat.size} not divisible by channels={Cin}"
+            )
+        pixels = flat.size // Cin
+        Hin, Win = _best_wh_from_pixels(pixels)
 
-    # 2. Resize the image to the target dimensions
-    target_size = (args.img_width, args.img_height)
-    img_resized = cv2.resize(img, target_size, interpolation=cv2.INTER_AREA)
-    print(f"Resized image shape: {img_resized.shape}")
+    Win = _as_int("input_width", Win)
+    Hin = _as_int("input_height", Hin)
 
-    # 3. Convert from BGR (OpenCV default) to RGB (standard for ML)
-    img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
-
-    # 4. Scale pixel values from 0-255 to 0-1 (as floating point)
-    img_scaled = img_rgb.astype(np.float32) / 255.0
-
-    # --- Output Features ---
-    # The features are the processed image array itself
-    features = img_scaled
-
-    # Save the features as a NumPy file
-    print(f"Saving features with shape {features.shape} to {args.features_out}")
-    np.save(args.features_out, features)
-
-    # --- Output Block Info ---
-    # Create a basic info.json file (required by EI)
-    info = {
-        "success": True,
-        "can_visualize": False,  # We are not generating a graph output
-        "warnings": [],
-    }
-    with open(args.info_out, "w") as f:
-        json.dump(info, f)
-
-    print("DSP block finished successfully.")
-    sys.exit(0)
-
-except Exception as e:
-    print(f"Error processing image {args.in_file}: {e}", file=sys.stderr)
-
-    # Output error info
-    info = {"success": False, "error": str(e), "warnings": []}
+    # ---- Reshape to HxWxC ----
     try:
-        with open(args.info_out, "w") as f:
-            json.dump(info, f)
-    except Exception as write_e:
-        print(f"Failed to write error info: {write_e}", file=sys.stderr)
+        img = flat.astype(np.float32).reshape(Hin, Win, Cin)
+    except Exception as e:
+        raise ValueError(
+            f"Could not reshape raw data to (H={Hin}, W={Win}, C={Cin}): {e}"
+        )
 
-    sys.exit(1)
+    # ---- Convert color space if needed (EI commonly provides RGB already) ----
+    # We'll assume RGB; if single-channel, keep as-is. If BGR was supplied,
+    # users can toggle below line to swap.
+    # img = img[..., ::-1]  # uncomment if input is BGR and you want RGB
+
+    # ---- Resize ----
+    # OpenCV expects (width, height)
+    if Cin == 1:
+        resized = cv2.resize(img, (Wt, Ht), interpolation=cv2.INTER_AREA)
+        # Keep single channel shape (H, W, 1)
+        if resized.ndim == 2:
+            resized = resized[..., None]
+    else:
+        resized = cv2.resize(img, (Wt, Ht), interpolation=cv2.INTER_AREA)
+
+    # ---- Scale to [0,1] ----
+    resized = _ensure_float01(resized)
+
+    # ---- Flatten features ----
+    features = resized.astype(np.float32).ravel().tolist()
+
+    # ---- Build output config ----
+    output_config = {
+        "type": "image",
+        "shape": {"width": Wt, "height": Ht, "channels": Cin},
+    }
+
+    return {
+        "features": features,
+        "graphs": [],  # no graphs
+        "fft_used": [],  # not used
+        "output_config": output_config,
+    }

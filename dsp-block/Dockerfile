@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set the working directory
 WORKDIR /dsp-block-dockerized
 
+ENV PORT=80
+
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -16,4 +18,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Define the entrypoint for the Edge Impulse runner
-ENTRYPOINT ["python3", "dsp.py"]
+ENTRYPOINT ["python3", "dsp-server.py"]
