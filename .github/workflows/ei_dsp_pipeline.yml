@@ -4,10 +4,10 @@ name: Push Edge Impulse DSP Block
 on:
   push:
     branches:
-      - dsp 
+      - dsp
     paths: # Only run if files in the DSP block directory change
       - 'dsp-block/**'
-  workflow_dispatch: # Allow manual triggering of the workflow
+  workflow_dispatch: # Allows manual triggering
 
 jobs:
   push-dsp-block:
@@ -30,7 +30,7 @@ jobs:
 
       # Step 4: Push the custom DSP block to Edge Impulse
       - name: Push Custom DSP Block
-        working-directory: ./dsp-block
+        working-directory: ./dsp-block # Point to the DSP block directory
         run: |
           edge-impulse-blocks push . \
             --api-key ${{ secrets.EI_API_KEY }}
