@@ -1,5 +1,5 @@
 # dsp_block/dsp.py
-import cv2  # OpenCV
+import cv2  # OpenCV2
 import numpy as np
 import json
 import argparse
@@ -12,7 +12,7 @@ parser.add_argument(
     "--features-out",
     type=str,
     required=True,
-    help="Output file for features (e.g., features.npy)",
+    help="Output file for the features (e.g., features.npy)",
 )
 parser.add_argument(
     "--draw-graphs-out",
