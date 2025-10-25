@@ -1,0 +1,44 @@
+{
+    "version": 1,
+    "type": "dsp",
+    "info": {
+        "name": "Custom Image Preprocessor (OpenCV)",
+        "description": "Loads, resizes (to target WxH), ensures RGB, and scales image pixels to 0-1 using OpenCV.",
+        "author": "Your Name",
+        "version": "1.0.0",
+        "organizationOnly": true,
+        "port": 0
+    },
+    "dsp": {
+        "image": {
+            "input": [
+                "width",
+                "height",
+                "channels"
+            ],
+            "output": [
+                "features"
+            ]
+        }
+    },
+    "arguments": [
+        {
+            "name": "img_width",
+            "type": "int",
+            "label": "Target Image Width",
+            "defaultValue": 96,
+            "minimum": 16,
+            "maximum": 512,
+            "category": "processing"
+        },
+        {
+            "name": "img_height",
+            "type": "int",
+            "label": "Target Image Height",
+            "defaultValue": 96,
+            "minimum": 16,
+            "maximum": 512,
+            "category": "processing"
+        }
+    ]
+}
