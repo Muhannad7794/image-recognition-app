@@ -17,8 +17,16 @@ parser.add_argument("--epochs", type=int, required=True)
 parser.add_argument("--learning-rate", type=float, required=True)
 parser.add_argument("--out-directory", type=str, required=True)
 
-
 args, unknown = parser.parse_known_args()
+
+# --- DEFINE IMAGE SHAPE ---
+# We know this from our DSP block's parameters.json
+IMG_HEIGHT = 96
+IMG_WIDTH = 96
+# The log `x_validate shape: (495, 96, 96, 1)` implies 1 channel.
+# And 96 * 96 * 1 = 9216, which matches x_train's flat features.
+CHANNELS = 1
+INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
 
 # --- Load Data using NumPy ---
 print(f"Loading data from directory: {args.data_directory}")
@@ -47,75 +55,73 @@ try:
     y_validate = np.load(y_val_path)
 
     print("Data loaded successfully.")
-    print(f"x_train shape: {x_train.shape}")
-    print(f"y_train shape: {y_train.shape}")
-    print(f"x_validate shape: {x_validate.shape}")
-    print(f"y_validate shape: {y_validate.shape}")
-
 
 except FileNotFoundError as e:
     print(f"\nError: A required .npy file was not found.")
-    print(f"Ensure feature generation completed and produced expected files:")
-    print(f"- X_train_features.npy")
-    print(f"- Y_train.npy")
-    print(f"- X_validate_features.npy")
-    print(f"- Y_validate.npy")
-    print(f"Files found in {args.data_directory}:")
-    try:
-        for filename in os.listdir(args.data_directory):
-            print(f"  - {filename}")
-    except Exception as list_e:
-        print(f"    Error listing directory: {list_e}")
-    print(f"\nDetails: {e}")
+    print(f"Details: {e}")
     sys.exit(1)
 except Exception as e:
     print(f"Error loading data from .npy files: {e}")
     sys.exit(1)
 
 
-# --- Determine Input Shape and Classes from Loaded Data ---
+# --- Reshape Data and Determine Classes ---
 try:
-    # The input shape for the model might need adjustment if features are flattened
-    # Check the shape of x_train. For MobileNetV2, we need (height, width, channels)
-    # If x_train is already (num_samples, features), we might need reshaping or a different base model.
-    # Let's assume the feature generator produced features suitable for GlobalAveragePooling2D
-    # If the second dimension is the number of features (e.g., shape is (N, F)), GAP won't work directly.
-    # For now, let's derive a placeholder shape, MobileNetV2 might need feature vector input if features are flat
-    if (
-        len(x_train.shape) == 2
-    ):  # Features might be flattened (Num Samples, Num Features)
-        print(
-            "Warning: Training features appear flattened. Model assumes features suitable for GlobalAveragePooling2D."
-        )
-        # If flattened, MobileNetV2 expects specific input dimensions.
-        # This example assumes features are NOT flat (Num Samples, Height, Width, Channels). Adjust if needed.
-        # INPUT_SHAPE = (x_train.shape[1],) # Example if input should be flat vector
-        print(
-            "Error: Flattened features detected, but model expects image-like input. Adjust model architecture or feature generation."
-        )
-        sys.exit(1)
-    elif len(x_train.shape) == 4:  # Expected shape (N, H, W, C)
-        INPUT_SHAPE = x_train.shape[1:]  # Get (Height, Width, Channels)
-    else:
-        print(f"Error: Unexpected x_train shape: {x_train.shape}")
-        sys.exit(1)
+    # --- THIS IS THE FIX ---
+    # Check if x_train is flat and reshape it
+    if len(x_train.shape) == 2:
+        print(f"Flattened training features detected (Shape: {x_train.shape}). Reshaping to {(-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS)}...")
+        x_train = x_train.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
+        print(f"New x_train shape: {x_train.shape}")
 
-    NUM_CLASSES = len(np.unique(y_train))
+    # Check if x_validate is flat and reshape it
+    # (The log says it's 3D, but it *should* be flat if the DSP ran correctly)
+    if len(x_validate.shape) == 2:
+        print(f"Flattened validation features detected (Shape: {x_validate.shape}). Reshaping to {(-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS)}...")
+        x_validate = x_validate.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
+        print(f"New x_validate shape: {x_validate.shape}")
+    # --- END OF FIX ---
+
+    # Verify shapes
+    if len(x_train.shape) != 4 or len(x_validate.shape) != 4:
+         print(f"Error: Mismatched data dimensions after reshape.")
+         print(f"x_train shape: {x_train.shape}")
+         print(f"x_validate shape: {x_validate.shape}")
+         sys.exit(1)
+
+    # --- FIX FOR LABELS ---
+    # The log shows y_validate has 46 classes, so we must trust that.
+    # Your y_train (shape 4) is likely wrong or from a different dataset.
+    # We will get the number of classes from the VALIDATION set.
+    
+    # We also must use sparse labels for "sparse_categorical_crossentropy"
+    # The labels should be (samples,) not (samples, classes)
+    if len(y_train.shape) == 2:
+        print(f"Warning: y_train is one-hot encoded (shape {y_train.shape}). Converting to sparse labels.")
+        y_train = np.argmax(y_train, axis=1)
+        print(f"New y_train shape: {y_train.shape}")
+
+    if len(y_validate.shape) == 2:
+        print(f"Warning: y_validate is one-hot encoded (shape {y_validate.shape}). Converting to sparse labels.")
+        y_validate = np.argmax(y_validate, axis=1)
+        print(f"New y_validate shape: {y_validate.shape}")
+
+    # Get class count from the set with all classes
+    NUM_CLASSES = len(np.unique(y_validate))
     if NUM_CLASSES <= 1:
-        print(f"Error: Only found {NUM_CLASSES} class(es) in y_train. Need at least 2.")
+        print(f"Error: Only found {NUM_CLASSES} class(es). Need at least 2.")
         sys.exit(1)
-
+    
+    print(f"Input shape: {INPUT_SHAPE}")
+    print(f"Number of classes: {NUM_CLASSES}")
+    
 except Exception as e:
-    print(f"Error determining input shape or number of classes: {e}")
+    print(f"Error processing data shapes: {e}")
+    traceback.print_exc()
     sys.exit(1)
 
 
-print(f"Deduced Input shape: {INPUT_SHAPE}")
-print(f"Number of classes: {NUM_CLASSES}")
-
 # --- Model Definition ---
-# Load MobileNetV2 base model
-# Note: Ensure INPUT_SHAPE matches what MobileNetV2 expects or adjust the model head
 base_model = MobileNetV2(input_shape=INPUT_SHAPE, include_top=False, weights="imagenet")
 base_model.trainable = False
 
