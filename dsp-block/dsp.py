@@ -133,11 +133,8 @@ def generate_features(
     # ---- Scale to [0,1] ----
     resized = _ensure_float01(resized)
 
-    # ---- THE FIX IS HERE ----
-    # Return a FLAT 1D array of features.
-    # The 'output_config' will tell EI how to reshape it.
-    features = resized.astype(np.float32).ravel().tolist()
-    # ---- END OF FIX ----
+    # Return the 3D features as a nested list.
+    features = resized.astype(np.float32).tolist()
 
     # ----- Build output config -----
     output_config = {
