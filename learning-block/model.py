@@ -9,6 +9,7 @@ import os
 import json
 import argparse
 import sys
+import traceback
 
 # --- Script Arguments ---
 parser = argparse.ArgumentParser(description="Train image classification model")
@@ -23,24 +24,33 @@ args, unknown = parser.parse_known_args()
 # We know this from our DSP block's parameters.json
 IMG_HEIGHT = 96
 IMG_WIDTH = 96
-# The log `x_validate shape: (495, 96, 96, 1)` implies 1 channel.
-# And 96 * 96 * 1 = 9216, which matches x_train's flat features.
-CHANNELS = 1
-INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
+# We will reshape to 1 channel first, then convert to 3
+CHANNELS_IN = 1
+CHANNELS_OUT = 3
+INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS_OUT)  # MobileNetV2 needs 3 channels
 
 # --- Load Data using NumPy ---
 print(f"Loading data from directory: {args.data_directory}")
 try:
+    # --- FIX for data file names ---
+    # The "Generate features" step creates "X_split_test.npy"
+    # But the training job renames it to "X_validate_features.npy"
+    # We will check for both names.
     x_train_path = os.path.join(args.data_directory, "X_train_features.npy")
-    y_train_path = os.path.join(
-        args.data_directory, "y_train.npy"
-    )  
-    x_val_path = os.path.join(
-        args.data_directory, "X_split_test.npy"
-    )  
-    y_val_path = os.path.join(
-        args.data_directory, "Y_split_test.npy"
-    )
+    y_train_path = os.path.join(args.data_directory, "y_train.npy")
+
+    x_val_path = os.path.join(args.data_directory, "X_validate_features.npy")
+    y_val_path = os.path.join(args.data_directory, "y_validate.npy")
+
+    # Fallback for old file names
+    if not os.path.exists(x_val_path):
+        print(
+            "Warning: X_validate_features.npy not found, falling back to X_split_test.npy"
+        )
+        x_val_path = os.path.join(args.data_directory, "X_split_test.npy")
+    if not os.path.exists(y_val_path):
+        print("Warning: y_validate.npy not found, falling back to Y_split_test.npy")
+        y_val_path = os.path.join(args.data_directory, "Y_split_test.npy")
 
     print(f"Loading training features: {x_train_path}")
     x_train = np.load(x_train_path)
@@ -67,54 +77,55 @@ except Exception as e:
 
 # --- Reshape Data and Determine Classes ---
 try:
-    # --- THIS IS THE FIX ---
-    # Check if x_train is flat and reshape it
+    # --- 3-CHANNEL FIX IS HERE ---
+
+    # Process Training Data
     if len(x_train.shape) == 2:
-        print(f"Flattened training features detected (Shape: {x_train.shape}). Reshaping to {(-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS)}...")
-        x_train = x_train.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
-        print(f"New x_train shape: {x_train.shape}")
+        print(f"Flattened training features detected. Reshaping to 1 channel...")
+        x_train = x_train.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS_IN))
+        print(f"New x_train shape (1 channel): {x_train.shape}")
 
-    # Check if x_validate is flat and reshape it
-    # (The log says it's 3D, but it *should* be flat if the DSP ran correctly)
+    print("Converting 1-channel training data to 3-channel (RGB)...")
+    x_train = np.repeat(x_train, CHANNELS_OUT, axis=-1)
+    print(f"New x_train shape (3 channel): {x_train.shape}")
+
+    # Process Validation Data
     if len(x_validate.shape) == 2:
-        print(f"Flattened validation features detected (Shape: {x_validate.shape}). Reshaping to {(-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS)}...")
-        x_validate = x_validate.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
-        print(f"New x_validate shape: {x_validate.shape}")
-    # --- END OF FIX ---
+        print(f"Flattened validation features detected. Reshaping to 1 channel...")
+        x_validate = x_validate.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS_IN))
+        print(f"New x_validate shape (1 channel): {x_validate.shape}")
 
-    # Verify shapes
-    if len(x_train.shape) != 4 or len(x_validate.shape) != 4:
-         print(f"Error: Mismatched data dimensions after reshape.")
-         print(f"x_train shape: {x_train.shape}")
-         print(f"x_validate shape: {x_validate.shape}")
-         sys.exit(1)
+    print("Converting 1-channel validation data to 3-channel (RGB)...")
+    x_validate = np.repeat(x_validate, CHANNELS_OUT, axis=-1)
+    print(f"New x_validate shape (3 channel): {x_validate.shape}")
+    # --- END OF 3-CHANNEL FIX ---
 
-    # --- FIX FOR LABELS ---
-    # The log shows y_validate has 46 classes, so we must trust that.
-    # Your y_train (shape 4) is likely wrong or from a different dataset.
-    # We will get the number of classes from the VALIDATION set.
-    
-    # We also must use sparse labels for "sparse_categorical_crossentropy"
-    # The labels should be (samples,) not (samples, classes)
+    # --- LABEL FIX ---
+    # Convert one-hot encoded labels to sparse labels
     if len(y_train.shape) == 2:
-        print(f"Warning: y_train is one-hot encoded (shape {y_train.shape}). Converting to sparse labels.")
+        print(f"Converting y_train from one-hot (shape {y_train.shape}) to sparse...")
         y_train = np.argmax(y_train, axis=1)
-        print(f"New y_train shape: {y_train.shape}")
-
     if len(y_validate.shape) == 2:
-        print(f"Warning: y_validate is one-hot encoded (shape {y_validate.shape}). Converting to sparse labels.")
+        print(
+            f"Converting y_validate from one-hot (shape {y_validate.shape}) to sparse..."
+        )
         y_validate = np.argmax(y_validate, axis=1)
-        print(f"New y_validate shape: {y_validate.shape}")
 
-    # Get class count from the set with all classes
-    NUM_CLASSES = len(np.unique(y_validate))
+    # Get class count from all combined labels
+    all_labels = np.concatenate((y_train, y_validate))
+    NUM_CLASSES = len(np.unique(all_labels))
+
+    print(f"Final x_train shape: {x_train.shape}")
+    print(f"Final y_train shape: {y_train.shape}")
+    print(f"Final x_validate shape: {x_validate.shape}")
+    print(f"Final y_validate shape: {y_validate.shape}")
+    print(f"Final Input shape for model: {INPUT_SHAPE}")
+    print(f"Final Number of classes: {NUM_CLASSES}")
+
     if NUM_CLASSES <= 1:
         print(f"Error: Only found {NUM_CLASSES} class(es). Need at least 2.")
         sys.exit(1)
-    
-    print(f"Input shape: {INPUT_SHAPE}")
-    print(f"Number of classes: {NUM_CLASSES}")
-    
+
 except Exception as e:
     print(f"Error processing data shapes: {e}")
     traceback.print_exc()

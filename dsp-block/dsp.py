@@ -139,7 +139,7 @@ def generate_features(
     features = resized.astype(np.float32).ravel().tolist()
     # ---- END OF FIX ----
 
-    # ---- Build output config ----
+    # ----- Build output config -----
     output_config = {
         "type": "image",
         "shape": {"width": Wt, "height": Ht, "channels": Cin},
