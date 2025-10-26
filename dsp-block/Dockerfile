@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Grant the python3 binary permission to bind to low ports
-RUN setcap 'cap_net_bind_service=+ep' /usr/bin/python3
+RUN setcap 'cap_net_bind_service=+ep' $(readlink -f /usr/bin/python3)
 
 # Now, create a non-root user to run the server
 RUN useradd --create-home --shell /bin/bash ei-user
