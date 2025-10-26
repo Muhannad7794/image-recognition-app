@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - dsp
+      - master
     paths: # Only run if files in the DSP block directory change
       - 'dsp-block/**'
   workflow_dispatch: # Allows manual triggering

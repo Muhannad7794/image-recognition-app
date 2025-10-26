@@ -1,10 +1,11 @@
 # .github/workflows/ei_training_pipeline.yml
 name: Push Edge Impulse Block
 
-# Run this workflow only on pushes to the master branch
+# Run this workflow when changes are pushed to the 'learn' or 'master' branches
 on:
   push:
     branches:
+      - learn
       - master
     paths: # Only run if files in the learning block directory change
       - 'learning-block/**'
