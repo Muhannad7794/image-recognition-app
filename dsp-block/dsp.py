@@ -134,7 +134,7 @@ def generate_features(
     resized = _ensure_float01(resized)
 
     # Return the 3D features as a nested list.
-    features = resized.astype(np.float32).tolist()
+    features = resized.astype(np.float32)
 
     # ----- Build output config -----
     output_config = {
