@@ -101,7 +101,7 @@ try:
     # --- END OF 3-CHANNEL FIX ---
 
     # --- LABEL FIX ---
-    # Convert one-hot encoded labels to sparse labels
+    # Convert one-hot encoded labels to sparse labels (0-45)
     if len(y_train.shape) == 2:
         print(f"Converting y_train from one-hot (shape {y_train.shape}) to sparse...")
         y_train = np.argmax(y_train, axis=1)
@@ -111,9 +111,23 @@ try:
         )
         y_validate = np.argmax(y_validate, axis=1)
 
-    # Get class count from all combined labels
-    all_labels = np.concatenate((y_train, y_validate))
-    NUM_CLASSES = len(np.unique(all_labels))
+    # --- FINAL 1-INDEXED FIX ---
+    # Check if max label is > (num_classes - 1)
+    # This handles the case where labels are 1-46 instead of 0-45
+    all_labels_for_check = np.concatenate((y_train, y_validate))
+    min_label = np.min(all_labels_for_check)
+    max_label = np.max(all_labels_for_check)
+    NUM_CLASSES = len(np.unique(all_labels_for_check))
+
+    if max_label >= NUM_CLASSES:
+        print(
+            f"Warning: Labels appear to be 1-indexed (min: {min_label}, max: {max_label}). Converting to 0-indexed."
+        )
+        y_train = y_train - 1
+        y_validate = y_validate - 1
+        # Recalculate class count just in case
+        NUM_CLASSES = len(np.unique(np.concatenate((y_train, y_validate))))
+    # --- END FINAL FIX ---
 
     print(f"Final x_train shape: {x_train.shape}")
     print(f"Final y_train shape: {y_train.shape}")

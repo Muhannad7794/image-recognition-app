@@ -1,5 +1,4 @@
-# dsp-server.py
-# Based on the proven working example.
+# dsp-block/dsp-server.py
 
 import sys, importlib, os, socket, json, math, traceback
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -153,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
                 post_body = self.rfile.read(content_len)
                 body = json.loads(post_body.decode("utf-8"))
                 batch_req(self, generate_features, body)
-                
+
             else:
                 self.send_response(404)
                 self.send_header("Content-Type", "text/plain")
