@@ -1,39 +1,47 @@
 {
-  "version": 1,
-  "type": "dsp",
-  "info": {
-    "title": "Custom Image Preprocessor (OpenCV)",
-    "author": "Your Name",
-    "description": "Resize to target WxH, ensure RGB, scale pixels to [0,1] using OpenCV.",
-    "name": "OpenCV Preprocessor",
-    "cppType": "opencv_image_preprocessor",
-    "latestImplementationVersion": 1
-  },
+    "version": 1,
+    "type": "dsp",
+    "info": {
+        "title": "Custom Image Preprocessor (OpenCV)",
+        "author": "Your Name",
+        "description": "Resize to target WxH, ensure RGB, scale pixels to [0,1] using OpenCV.",
+        "name": "OpenCV Preprocessor",
+        "cppType": "opencv_image_preprocessor",
+        "preferConvolution": true,
+        "latestImplementationVersion": 1,
+        "port": 4446
+    },
     "dsp": {
-    "image": {
-      "input": ["width", "height", "channels"],
-      "output": ["features"]
-    }
-  },
-  "parameters": [
-    {
-      "group": "Image size",
-      "items": [
-        {
-          "name": "Target image width",
-          "value": 96,
-          "type": "int",
-          "help": "Width (pixels) of the output image/features.",
-          "param": "img-width"
-        },
-        {
-          "name": "Target image height",
-          "value": 96,
-          "type": "int",
-          "help": "Height (pixels) of the output image/features.",
-          "param": "img-height"
+        "image": {
+            "input": [
+                "width",
+                "height",
+                "channels"
+            ],
+            "output": [
+                "features"
+            ]
         }
-      ]
-    }
-  ]
+    },
+    "parameters": [
+        {
+            "group": "Image size",
+            "items": [
+                {
+                    "name": "Target image width",
+                    "value": 96,
+                    "type": "int",
+                    "help": "Width (pixels) of the output image/features.",
+                    "param": "img-width"
+                },
+                {
+                    "name": "Target image height",
+                    "value": 96,
+                    "type": "int",
+                    "help": "Height (pixels) of the output image/features.",
+                    "param": "img-height"
+                }
+            ]
+        }
+    ]
 }
