@@ -14,6 +14,7 @@ except Exception as e:
 
 # ---------- Utilities ----------
 
+
 def _as_int(name: str, value: Any, lo: int = 1, hi: int = 8192) -> int:
     try:
         iv = int(value)
@@ -49,11 +50,13 @@ def _best_wh_from_pixels(pixels: int) -> Tuple[int, int]:
         s = int(np.sqrt(pixels))
         return max(1, s), max(1, s)
     targets = [1.0, 4 / 3, 16 / 9, 3 / 4, 9 / 16]
+
     def score(hw: Tuple[int, int]) -> float:
         h, w = hw
         ratio = w / h
         aspect_err = min(abs(ratio - t) for t in targets)
         return aspect_err + 1e-6 * (1 / h)
+
     best = min(pairs, key=score)
     return best
 
@@ -66,6 +69,7 @@ def _ensure_float01(arr: np.ndarray) -> np.ndarray:
 
 
 # ---------- Main hook called by EI server ----------
+
 
 def generate_features(
     implementation_version: int,
@@ -87,7 +91,11 @@ def generate_features(
     flat = raw.reshape(-1) if raw.ndim > 1 else raw
 
     # ---- Determine input channels (prefer explicit) ----
-    Cin = kwargs.get("channels") or kwargs.get("input_channels") or _infer_channels(axes, flat.size)
+    Cin = (
+        kwargs.get("channels")
+        or kwargs.get("input_channels")
+        or _infer_channels(axes, flat.size)
+    )
     if Cin not in (1, 3):
         Cin = 3 if flat.size % 3 == 0 else 1
 
@@ -126,9 +134,9 @@ def generate_features(
     resized = _ensure_float01(resized)
 
     # ---- THE FIX IS HERE ----
-    # Return the 3D features as a nested list, NOT a flat array.
-    # We have removed .ravel()
-    features = resized.astype(np.float32).tolist()
+    # Return a FLAT 1D array of features.
+    # The 'output_config' will tell EI how to reshape it.
+    features = resized.astype(np.float32).ravel().tolist()
     # ---- END OF FIX ----
 
     # ---- Build output config ----
