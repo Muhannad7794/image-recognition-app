@@ -75,32 +75,28 @@ except Exception as e:
     sys.exit(1)
 
 
-# --- Reshape Data and Determine Classes ---
+# --- Process Data and Determine Classes ---
 try:
-    # --- 3-CHANNEL FIX IS HERE ---
+    # Data should already be in (N, H, W, C) format from the DSP block
+    print(f"Loaded x_train shape: {x_train.shape}")
+    print(f"Loaded x_validate shape: {x_validate.shape}")
 
-    # Process Training Data
-    if len(x_train.shape) == 2:
-        print(f"Flattened training features detected. Reshaping to 1 channel...")
-        x_train = x_train.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS_IN))
-        print(f"New x_train shape (1 channel): {x_train.shape}")
+    # Verify dimensions (expecting 4D: Samples, Height, Width, Channels)
+    if len(x_train.shape) != 4 or len(x_validate.shape) != 4:
+        print(f"Error: Unexpected data dimensions.")
+        print(f"Expected 4D (Samples, H, W, C), got:")
+        print(f"x_train shape: {x_train.shape}")
+        print(f"x_validate shape: {x_validate.shape}")
+        sys.exit(1)
 
-    print("Converting 1-channel training data to 3-channel (RGB)...")
-    x_train = np.repeat(x_train, CHANNELS_OUT, axis=-1)
-    print(f"New x_train shape (3 channel): {x_train.shape}")
+    # Ensure correct channel count (should be 3 now)
+    if x_train.shape[3] != CHANNELS_OUT or x_validate.shape[3] != CHANNELS_OUT:
+        print(f"Error: Expected {CHANNELS_OUT} channels, but data has different shape.")
+        print(f"x_train shape: {x_train.shape}")
+        print(f"x_validate shape: {x_validate.shape}")
+        sys.exit(1)
 
-    # Process Validation Data
-    if len(x_validate.shape) == 2:
-        print(f"Flattened validation features detected. Reshaping to 1 channel...")
-        x_validate = x_validate.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS_IN))
-        print(f"New x_validate shape (1 channel): {x_validate.shape}")
-
-    print("Converting 1-channel validation data to 3-channel (RGB)...")
-    x_validate = np.repeat(x_validate, CHANNELS_OUT, axis=-1)
-    print(f"New x_validate shape (3 channel): {x_validate.shape}")
-    # --- END OF 3-CHANNEL FIX ---
-
-    # --- LABEL FIX ---
+    # --- LABEL FIX (Keep this part) ---
     # Convert one-hot encoded labels to sparse labels (0-45)
     if len(y_train.shape) == 2:
         print(f"Converting y_train from one-hot (shape {y_train.shape}) to sparse...")
@@ -111,40 +107,32 @@ try:
         )
         y_validate = np.argmax(y_validate, axis=1)
 
-    # --- FINAL 1-INDEXED FIX ---
-    # Check if max label is > (num_classes - 1)
-    # This handles the case where labels are 1-46 instead of 0-45
+    # Adjust if labels are 1-indexed
     all_labels_for_check = np.concatenate((y_train, y_validate))
     min_label = np.min(all_labels_for_check)
     max_label = np.max(all_labels_for_check)
     NUM_CLASSES = len(np.unique(all_labels_for_check))
 
     if max_label >= NUM_CLASSES:
-        print(
-            f"Warning: Labels appear to be 1-indexed (min: {min_label}, max: {max_label}). Converting to 0-indexed."
-        )
+        print(f"Warning: Labels appear to be 1-indexed. Converting to 0-indexed.")
         y_train = y_train - 1
         y_validate = y_validate - 1
-        # Recalculate class count just in case
         NUM_CLASSES = len(np.unique(np.concatenate((y_train, y_validate))))
-    # --- END FINAL FIX ---
+    # --- END LABEL FIX ---
 
     print(f"Final x_train shape: {x_train.shape}")
     print(f"Final y_train shape: {y_train.shape}")
     print(f"Final x_validate shape: {x_validate.shape}")
     print(f"Final y_validate shape: {y_validate.shape}")
-    print(f"Final Input shape for model: {INPUT_SHAPE}")
+    print(
+        f"Final Input shape for model: {INPUT_SHAPE}"
+    )  # INPUT_SHAPE should still be (96, 96, 3)
     print(f"Final Number of classes: {NUM_CLASSES}")
-
-    if NUM_CLASSES <= 1:
-        print(f"Error: Only found {NUM_CLASSES} class(es). Need at least 2.")
-        sys.exit(1)
 
 except Exception as e:
     print(f"Error processing data shapes: {e}")
     traceback.print_exc()
     sys.exit(1)
-
 
 # --- Model Definition ---
 base_model = MobileNetV2(input_shape=INPUT_SHAPE, include_top=False, weights="imagenet")
