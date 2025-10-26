@@ -1,17 +1,18 @@
 # dsp.py
-# Server-facing processing function for Edge Impulse custom DSP blocks.
-# Exposes: generate_features(...)
-#
-# Edge Impulse's dsp-server.py will import and call generate_features.
-# Parameters from parameters.json arrive as kwargs with hyphens converted
-# to underscores (e.g., "img-width" -> img_width).
-
 from typing import Any, Dict, List, Tuple
 import numpy as np
 
+# Lazy import so the server can start and give a clear error if OpenCV is missing
+try:
+    import cv2  # type: ignore
+except Exception as e:
+    raise RuntimeError(
+        "OpenCV is not available in the container. "
+        "Ensure 'opencv-python-headless' is installed in the Docker image."
+    ) from e
+
 
 # ---------- Utilities ----------
-
 
 def _as_int(name: str, value: Any, lo: int = 1, hi: int = 8192) -> int:
     try:
@@ -24,7 +25,6 @@ def _as_int(name: str, value: Any, lo: int = 1, hi: int = 8192) -> int:
 
 
 def _infer_channels(axes: List[str] | None, raw_len: int) -> int:
-    """Infer channels from axes or fall back to divisibility heuristics."""
     if axes:
         a = [str(x).lower() for x in axes]
         if {"r", "g", "b"}.issubset(set(a)):
@@ -33,42 +33,32 @@ def _infer_channels(axes: List[str] | None, raw_len: int) -> int:
             return 1
         if len(a) in (1, 3):
             return len(a)
-    # Fallback: prefer RGB if divisible by 3
     if raw_len % 3 == 0:
         return 3
     return 1
 
 
 def _best_wh_from_pixels(pixels: int) -> Tuple[int, int]:
-    """
-    Heuristic: pick H,W from factor pairs of 'pixels' that best match common aspect ratios.
-    Only used if width/height were not provided.
-    """
     pairs: List[Tuple[int, int]] = []
     r = int(np.sqrt(pixels))
     for h in range(1, r + 1):
         if pixels % h == 0:
             w = pixels // h
             pairs.append((h, w))
-
     if not pairs:
         s = int(np.sqrt(pixels))
         return max(1, s), max(1, s)
-
     targets = [1.0, 4 / 3, 16 / 9, 3 / 4, 9 / 16]
-
     def score(hw: Tuple[int, int]) -> float:
         h, w = hw
         ratio = w / h
         aspect_err = min(abs(ratio - t) for t in targets)
-        return aspect_err + 1e-6 * (1 / h)  # tiny bias toward larger H
-
+        return aspect_err + 1e-6 * (1 / h)
     best = min(pairs, key=score)
     return best
 
 
 def _ensure_float01(arr: np.ndarray) -> np.ndarray:
-    """Convert an array to float32 in [0,1] from either [0,255] uint8 or already [0,1]."""
     a = arr.astype(np.float32)
     if a.max() > 1.5:
         a = a / 255.0
@@ -76,7 +66,6 @@ def _ensure_float01(arr: np.ndarray) -> np.ndarray:
 
 
 # ---------- Main hook called by EI server ----------
-
 
 def generate_features(
     implementation_version: int,
@@ -86,44 +75,25 @@ def generate_features(
     sampling_freq: float | None,
     img_width: int | None = None,
     img_height: int | None = None,
-    width: int | None = None,
-    height: int | None = None,
-    channels: int | None = None,
-    input_width: int | None = None,
-    input_height: int | None = None,
-    input_channels: int | None = None,
     **kwargs,
 ) -> Dict[str, Any]:
-    # Lazy import so the server can start and give a clear error if OpenCV is missing
-    try:
-        import cv2  # type: ignore
-    except Exception as e:
-        raise RuntimeError(
-            "OpenCV is not available in the container. "
-            "Ensure 'opencv-python-headless' is installed in the Docker image."
-        ) from e
 
     # ---- Read target size from parameters.json ----
-    if img_width is None and "img-width" in kwargs:  # just in case
-        img_width = kwargs["img-width"]
-    if img_height is None and "img-height" in kwargs:
-        img_height = kwargs["img-height"]
-
-    Wt = _as_int("img_width", img_width)
-    Ht = _as_int("img_height", img_height)
+    Wt = _as_int("img_width", kwargs.get("img-width", 96))
+    Ht = _as_int("img_height", kwargs.get("img-height", 96))
 
     # ---- Flatten & basic info ----
     raw = np.asarray(raw_data)
     flat = raw.reshape(-1) if raw.ndim > 1 else raw
 
     # ---- Determine input channels (prefer explicit) ----
-    Cin = channels or input_channels or _infer_channels(axes, flat.size)
+    Cin = kwargs.get("channels") or kwargs.get("input_channels") or _infer_channels(axes, flat.size)
     if Cin not in (1, 3):
         Cin = 3 if flat.size % 3 == 0 else 1
 
     # ---- Determine input W,H (prefer explicit) ----
-    Win = width or input_width
-    Hin = height or input_height
+    Win = kwargs.get("width") or kwargs.get("input_width")
+    Hin = kwargs.get("height") or kwargs.get("input_height")
 
     if Win is None or Hin is None:
         if flat.size % Cin != 0:
@@ -144,10 +114,6 @@ def generate_features(
             f"Could not reshape raw data to (H={Hin}, W={Win}, C={Cin}): {e}"
         )
 
-    # ---- Color space note ----
-    # EI commonly supplies RGB already. If your source is BGR, uncomment:
-    # img = img[..., ::-1]  # BGR -> RGB
-
     # ---- Resize (OpenCV expects (width, height)) ----
     if Cin == 1:
         resized = cv2.resize(img, (Wt, Ht), interpolation=cv2.INTER_AREA)
@@ -159,8 +125,11 @@ def generate_features(
     # ---- Scale to [0,1] ----
     resized = _ensure_float01(resized)
 
-    # ---- Flatten features ----
-    features = resized.astype(np.float32).ravel().tolist()
+    # ---- THE FIX IS HERE ----
+    # Return the 3D features as a nested list, NOT a flat array.
+    # We have removed .ravel()
+    features = resized.astype(np.float32).tolist()
+    # ---- END OF FIX ----
 
     # ---- Build output config ----
     output_config = {
