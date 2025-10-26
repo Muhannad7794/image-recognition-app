@@ -1,5 +1,5 @@
 # learning-block/Dockerfile
-FROM python:3.11
+FROM tensorflow/tensorflow:latest-gpu
 
 # Set the working directory 
 WORKDIR /learning-block-dockerized

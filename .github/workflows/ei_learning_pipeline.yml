@@ -1,5 +1,5 @@
 # .github/workflows/ei_training_pipeline.yml
-name: Push Edge Impulse Block
+name: Push Edge Impulse Learning Block
 
 # Run this workflow when changes are pushed to the 'learn' or 'master' branches
 on:
