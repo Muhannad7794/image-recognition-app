@@ -37,4 +37,4 @@ EXPOSE 4446
 RUN echo "Contents of /app:" && ls -la
 
 # Run the server as root
-ENTRYPOINT ["python3", "-u", "dsp-server.py"]
+CMD python3 -u dsp-server.py
