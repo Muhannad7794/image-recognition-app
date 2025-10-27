@@ -1,4 +1,4 @@
-### learning-block/aug/model.py  new run01
+# learning-block/aug/model.py
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.layers import (
@@ -12,7 +12,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import numpy as np
-import os, json, argparse, sys, traceback
+import os, json, argparse, sys
 
 # --- Args ---
 parser = argparse.ArgumentParser(
@@ -32,39 +32,25 @@ INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
 print(f"[AUG] Loading from: {args.data_directory}")
 
 
-# --- Helper: pick first existing pair (validate, then split_test) ---
-def _pick_paths(root: str):
-    candidates = [
-        (
-            "X_train_features.npy",
-            "y_train.npy",
-            "X_validate_features.npy",
-            "y_validate.npy",
-        ),
-        ("X_train_features.npy", "y_train.npy", "X_split_test.npy", "Y_split_test.npy"),
-    ]
-    for xt, yt, xv, yv in candidates:
-        xp = os.path.join(root, xt)
-        yp = os.path.join(root, yt)
-        xvp = os.path.join(root, xv)
-        yvp = os.path.join(root, yv)
-        if all(os.path.exists(p) for p in (xp, yp, xvp, yvp)):
-            src = "validate" if "validate" in xv else "split_test"
-            return (xp, yp, xvp, yvp, src)
-    # If we get here, print what’s missing
-    print("[AUG][FATAL] Could not find a matching train/val file set.")
-    print(f"  Tried:")
-    for xt, yt, xv, yv in candidates:
-        print(f"   - {xt}, {yt}, {xv}, {yv}")
-    sys.exit(1)
+# --- Resolve file paths (prefer split-aware pairs for BOTH train & val) ---
+def _pick(root: str, names: list[str]) -> str:
+    for n in names:
+        p = os.path.join(root, n)
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f"None of {names} found under {root}")
 
 
-x_train_path, y_train_path, x_val_path, y_val_path, val_src = _pick_paths(
-    args.data_directory
-)
-print(
-    f"[AUG] Using validation source: {val_src} ({os.path.basename(x_val_path)}, {os.path.basename(y_val_path)})"
-)
+x_train_path = _pick(args.data_directory, ["X_split_train.npy", "X_train_features.npy"])
+y_train_path = _pick(args.data_directory, ["Y_split_train.npy", "y_train.npy"])
+x_val_path = _pick(args.data_directory, ["X_split_test.npy", "X_validate_features.npy"])
+y_val_path = _pick(args.data_directory, ["Y_split_test.npy", "y_validate.npy"])
+
+print("[AUG] Directory listing:", sorted(os.listdir(args.data_directory)))
+print(f"[AUG] Train X: {os.path.basename(x_train_path)}")
+print(f"[AUG] Train y: {os.path.basename(y_train_path)}")
+print(f"[AUG] Val   X: {os.path.basename(x_val_path)}")
+print(f"[AUG] Val   y: {os.path.basename(y_val_path)}")
 
 # --- Load ---
 x_train = np.load(x_train_path)
@@ -75,79 +61,75 @@ y_val = np.load(y_val_path)
 print(f"[AUG] x_train (raw): {x_train.shape}, x_val (raw): {x_val.shape}")
 print(f"[AUG] y_train (raw): {y_train.shape}, y_val (raw): {y_val.shape}")
 
-# --- Shapes ---
+# --- Ensure NHWC (N, 96, 96, 3) and float32 ---
 expected_feat_len = IMG_HEIGHT * IMG_WIDTH * CHANNELS
 
 
-def _ensure_4d(x, name):
+def _to_nhwc(x: np.ndarray, name: str) -> np.ndarray:
     if x.ndim == 2:
         if x.shape[1] != expected_feat_len:
-            print(
+            raise ValueError(
                 f"[AUG][FATAL] {name} feature len {x.shape[1]} != {expected_feat_len}"
             )
-            sys.exit(1)
-        return x.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
-    return x
+        x = x.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
+    if x.ndim != 4 or x.shape[1:] != (IMG_HEIGHT, IMG_WIDTH, CHANNELS):
+        raise ValueError(
+            f"[AUG][FATAL] Bad tensor shape for {name}: {x.shape}, expected (N,{IMG_HEIGHT},{IMG_WIDTH},{CHANNELS})"
+        )
+    return x.astype(np.float32, copy=False)
 
 
-x_train = _ensure_4d(x_train, "x_train")
-x_val = _ensure_4d(x_val, "x_val")
+x_train = _to_nhwc(x_train, "x_train")
+x_val = _to_nhwc(x_val, "x_val")
 
-if x_train.ndim != 4 or x_val.ndim != 4:
-    print(
-        f"[AUG][FATAL] Unexpected dims after reshape. Train {x_train.shape}, Val {x_val.shape}"
+# --- Labels: enforce identical label spaces BEFORE converting to sparse ---
+if y_train.ndim == 2 and y_val.ndim == 2:
+    # One-hot width must match exactly across splits
+    if y_train.shape[1] != y_val.shape[1]:
+        raise ValueError(
+            f"[AUG][FATAL] Label-space mismatch: train one-hot width={y_train.shape[1]} "
+            f"vs val width={y_val.shape[1]}. Recalculate features for ALL data."
+        )
+    NUM_CLASSES = int(y_train.shape[1])
+    y_train = y_train.argmax(axis=1)
+    y_val = y_val.argmax(axis=1)
+
+elif y_train.ndim == 1 and y_val.ndim == 1:
+    # Sparse labels: compute NUM_CLASSES and validate ranges
+    NUM_CLASSES = int(max(y_train.max(), y_val.max()) + 1)
+else:
+    raise ValueError(
+        f"[AUG][FATAL] Inconsistent label dims: train={y_train.ndim}D, val={y_val.ndim}D"
     )
-    sys.exit(1)
-if x_train.shape[1:] != INPUT_SHAPE or x_val.shape[1:] != INPUT_SHAPE:
-    print(
-        f"[AUG][FATAL] Data shape != INPUT_SHAPE. Expected {INPUT_SHAPE}, got {x_train.shape[1:]}, {x_val.shape[1:]}"
-    )
-    sys.exit(1)
 
-x_train = x_train.astype(np.float32, copy=False)
-x_val = x_val.astype(np.float32, copy=False)
-
-
-# --- Labels: one-hot -> sparse, 1-indexed -> 0-indexed, unify spaces if needed ---
-def to_sparse(y):
-    return np.argmax(y, axis=1) if y.ndim == 2 else y
-
-
-y_train = to_sparse(y_train)
-y_val = to_sparse(y_val)
-
-# Shift 1-indexed jointly
-if (y_train.min() == 1) and (y_val.min() == 1):
+# Optional: handle joint 1-indexed labels
+if y_train.min() == 1 and y_val.min() == 1:
     print("[AUG] Shifting labels from 1-indexed to 0-indexed.")
     y_train = y_train - 1
     y_val = y_val - 1
 
-ut, uv = np.unique(y_train), np.unique(y_val)
-kt, kv = ut.size, uv.size
-print(f"[AUG] Train classes={kt} {ut[:10]}..., Val classes={kv} {uv[:10]}...")
-
-# If class index sets differ, remap both to union (prevents crashes; warns loudly)
-union = np.unique(np.concatenate([ut, uv]))
-if not np.array_equal(ut, uv):
-    print(
-        f"[AUG][WARN] Train/Val class sets differ. Unifying via union mapping. "
-        f"(Train K={kt}, Val K={kv}, Union K={union.size})"
+# Sanity on label ranges
+if (y_train.min() < 0) or (y_val.min() < 0):
+    raise ValueError("[AUG][FATAL] Negative class index found after preprocessing.")
+if (y_train.max() >= NUM_CLASSES) or (y_val.max() >= NUM_CLASSES):
+    raise ValueError(
+        f"[AUG][FATAL] Class index out of range: max(train)={y_train.max()}, "
+        f"max(val)={y_val.max()}, NUM_CLASSES={NUM_CLASSES}"
     )
-    remap = {c: i for i, c in enumerate(union)}
-    y_train = np.vectorize(remap.get)(y_train)
-    y_val = np.vectorize(remap.get)(y_val)
-
-NUM_CLASSES = int(np.unique(np.concatenate([y_train, y_val])).size)
 
 
-def _hist(lbls, name):
+# Quick histograms (useful diagnostics)
+def _hist(lbls: np.ndarray, name: str):
     h = np.bincount(lbls.astype(int), minlength=NUM_CLASSES)
     print(f"[AUG] Class histogram {name} (n={len(lbls)}): {h}")
 
 
 _hist(y_train, "train")
 _hist(y_val, "val")
+
 print(f"[AUG] Final INPUT_SHAPE={INPUT_SHAPE}, NUM_CLASSES={NUM_CLASSES}")
+print(f"[AUG] x_train: {x_train.shape}, x_val: {x_val.shape}")
+print(f"[AUG] y_train: {y_train.shape}, y_val: {y_val.shape}")
 
 # --- Model ---
 inp = Input(shape=INPUT_SHAPE, name="image_input")
@@ -223,16 +205,12 @@ try:
 except Exception as e:
     print(f"[AUG] Primary TFLite conversion failed: {e}")
     print("[AUG] Retrying from SavedModel ...")
-    try:
-        conv = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
-        conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
-        tflite_model = conv.convert()
-        with open(tflite_path, "wb") as f:
-            f.write(tflite_model)
-        print("[AUG] TFLite model written (from SavedModel).")
-    except Exception as e2:
-        print(f"[AUG] Fallback TFLite conversion failed: {e2}")
-        sys.exit(1)
+    conv = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
+    conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    tflite_model = conv.convert()
+    with open(tflite_path, "wb") as f:
+        f.write(tflite_model)
+    print("[AUG] TFLite model written (from SavedModel).")
 
 # Save history
 hist_path = os.path.join(out_dir, "training_history.json")
