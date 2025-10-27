@@ -17,10 +17,6 @@ import argparse
 import sys
 import traceback
 
-# debug to check versions
-print("NumPy:", np.__version__)
-print("TF:", tf.__version__)
-
 # --- Script Arguments ---
 parser = argparse.ArgumentParser(description="Train image classification model")
 parser.add_argument("--data-directory", type=str, required=True)
@@ -110,11 +106,11 @@ try:
         )
         sys.exit(1)
 
-    # Ensure dtype float32 (DSP already outputs [0,1], keep that)
+    # Ensure dtype float32
     x_train = x_train.astype(np.float32, copy=False)
     x_validate = x_validate.astype(np.float32, copy=False)
 
-    # --- LABEL FIX (Keep this part) ---
+    # --- LABEL FIX ---
     if y_train.ndim == 2:
         print(f"Converting y_train from one-hot (shape {y_train.shape}) to sparse...")
         y_train = np.argmax(y_train, axis=1)
@@ -125,10 +121,8 @@ try:
         y_validate = np.argmax(y_validate, axis=1)
 
     all_labels_for_check = np.concatenate((y_train, y_validate))
-    min_label = np.min(all_labels_for_check)
-    max_label = np.max(all_labels_for_check)
     NUM_CLASSES = len(np.unique(all_labels_for_check))
-
+    max_label = int(all_labels_for_check.max())
     if max_label >= NUM_CLASSES:
         print("Warning: Labels appear to be 1-indexed. Converting to 0-indexed.")
         y_train = y_train - 1
@@ -148,13 +142,10 @@ except Exception as e:
     sys.exit(1)
 
 # --- Model Definition ---
-# Input layer to keep things explicit
 inp = Input(shape=INPUT_SHAPE, name="image_input")
-
-# Scale [0,1] -> [-1,1] for MobileNetV2
 scaled = Rescaling(scale=2.0, offset=-1.0, name="to_minus1_plus1")(inp)
 
-# Base model (imagenet weights expect 3-channel RGB and [-1,1] range)
+# Load local 96x96 no-top weights
 weights_path = os.path.expanduser(
     "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5"
 )
@@ -167,7 +158,6 @@ x = base_model(scaled, training=False)
 x = GlobalAveragePooling2D(name="gap")(x)
 x = Dropout(0.5, name="dropout")(x)
 predictions = Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
-
 model = Model(inputs=inp, outputs=predictions)
 
 # --- Compile Model ---
@@ -191,14 +181,39 @@ history = model.fit(
 )
 print("Training finished.")
 
-# --- Save Model ---
+# --- Save Model (SavedModel + TFLite) ---
 model_save_path = os.path.join(args.out_directory, "saved_model")
 print(f"Saving model to {model_save_path}")
 model.save(model_save_path)
 
-# Save history (optional)
+# TFLite float32 export at /home/model.tflite (EI profiler expects this exact path)
+tflite_path = os.path.join(args.out_directory, "model.tflite")
+print(f"Converting to TFLite (float32) -> {tflite_path}")
+try:
+    converter = tf.lite.TFLiteConverter.from_keras_model(model)
+    # Ensure pure TFLite ops
+    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    # Keep float32 (no quantization)
+    tflite_model = converter.convert()
+    with open(tflite_path, "wb") as f:
+        f.write(tflite_model)
+    print("TFLite model written.")
+except Exception as e:
+    print(f"Primary TFLite conversion failed: {e}")
+    print("Retrying from SavedModel directory...")
+    try:
+        converter = tf.lite.TFLiteConverter.from_saved_model(model_save_path)
+        converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+        tflite_model = converter.convert()
+        with open(tflite_path, "wb") as f:
+            f.write(tflite_model)
+        print("TFLite model written from SavedModel.")
+    except Exception as e2:
+        print(f"Fallback TFLite conversion failed: {e2}")
+        sys.exit(1)
+
+# Save training history
 history_save_path = os.path.join(args.out_directory, "training_history.json")
 with open(history_save_path, "w") as f:
     json.dump(history.history, f)
-
 print("Model and history saved.")
