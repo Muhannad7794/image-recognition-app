@@ -1,7 +1,13 @@
 # learning-block/model.py
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
+from tensorflow.keras.layers import (
+    Dense,
+    GlobalAveragePooling2D,
+    Dropout,
+    Rescaling,
+    Input,
+)
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 import numpy as np
@@ -17,25 +23,17 @@ parser.add_argument("--data-directory", type=str, required=True)
 parser.add_argument("--epochs", type=int, required=True)
 parser.add_argument("--learning-rate", type=float, required=True)
 parser.add_argument("--out-directory", type=str, required=True)
-
 args, unknown = parser.parse_known_args()
 
-# --- DEFINE IMAGE SHAPE ---
-# We know this from our DSP block's parameters.json
+# --- Define image shape (must match DSP out_channels/size) ---
 IMG_HEIGHT = 96
 IMG_WIDTH = 96
-# We will reshape to 1 channel first, then convert to 3
-CHANNELS_IN = 1
-CHANNELS_OUT = 3
-INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS_OUT)  # MobileNetV2 needs 3 channels
+CHANNELS = 3  # <- keep in sync with parameters.json: out_channels = 3
+INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
 
 # --- Load Data using NumPy ---
 print(f"Loading data from directory: {args.data_directory}")
 try:
-    # --- FIX for data file names ---
-    # The "Generate features" step creates "X_split_test.npy"
-    # But the training job renames it to "X_validate_features.npy"
-    # We will check for both names.
     x_train_path = os.path.join(args.data_directory, "X_train_features.npy")
     y_train_path = os.path.join(args.data_directory, "y_train.npy")
 
@@ -65,68 +63,79 @@ try:
     y_validate = np.load(y_val_path)
 
     print("Data loaded successfully.")
-
 except FileNotFoundError as e:
-    print(f"\nError: A required .npy file was not found.")
-    print(f"Details: {e}")
+    print(f"\nError: A required .npy file was not found.\nDetails: {e}")
     sys.exit(1)
 except Exception as e:
     print(f"Error loading data from .npy files: {e}")
     sys.exit(1)
 
-
 # --- Process Data and Determine Classes ---
 try:
-    # Data should already be in (N, H, W, C) format from the DSP block
     print(f"Loaded x_train shape: {x_train.shape}")
     print(f"Loaded x_validate shape: {x_validate.shape}")
 
-    # Verify dimensions (expecting 4D: Samples, Height, Width, Channels)
-    if len(x_train.shape) != 4 or len(x_validate.shape) != 4:
-        print(f"Error: Unexpected data dimensions.")
-        print(f"Expected 4D (Samples, H, W, C), got:")
+    expected_feat_len = IMG_HEIGHT * IMG_WIDTH * CHANNELS
+
+    # If flat (N, F), reshape to (N, H, W, C)
+    if x_train.ndim == 2:
+        if x_train.shape[1] != expected_feat_len:
+            print(
+                f"Error: x_train feature length {x_train.shape[1]} != expected {expected_feat_len}"
+            )
+            sys.exit(1)
+        x_train = x_train.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
+    if x_validate.ndim == 2:
+        if x_validate.shape[1] != expected_feat_len:
+            print(
+                f"Error: x_validate feature length {x_validate.shape[1]} != expected {expected_feat_len}"
+            )
+            sys.exit(1)
+        x_validate = x_validate.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
+
+    # If already 4D, verify shape
+    if x_train.ndim != 4 or x_validate.ndim != 4:
+        print("Error: Unexpected data dimensions after reshape attempt.")
         print(f"x_train shape: {x_train.shape}")
         print(f"x_validate shape: {x_validate.shape}")
+        sys.exit(1)
+    if x_train.shape[1:] != INPUT_SHAPE or x_validate.shape[1:] != INPUT_SHAPE:
+        print("Error: Data shape does not match expected INPUT_SHAPE.")
+        print(
+            f"Expected: {INPUT_SHAPE}, got x_train: {x_train.shape[1:]}, x_validate: {x_validate.shape[1:]}"
+        )
         sys.exit(1)
 
-    # Ensure correct channel count (should be 3 now)
-    if x_train.shape[3] != CHANNELS_OUT or x_validate.shape[3] != CHANNELS_OUT:
-        print(f"Error: Expected {CHANNELS_OUT} channels, but data has different shape.")
-        print(f"x_train shape: {x_train.shape}")
-        print(f"x_validate shape: {x_validate.shape}")
-        sys.exit(1)
+    # Ensure dtype float32 (DSP already outputs [0,1], keep that)
+    x_train = x_train.astype(np.float32, copy=False)
+    x_validate = x_validate.astype(np.float32, copy=False)
 
     # --- LABEL FIX (Keep this part) ---
-    # Convert one-hot encoded labels to sparse labels (0-45)
-    if len(y_train.shape) == 2:
+    if y_train.ndim == 2:
         print(f"Converting y_train from one-hot (shape {y_train.shape}) to sparse...")
         y_train = np.argmax(y_train, axis=1)
-    if len(y_validate.shape) == 2:
+    if y_validate.ndim == 2:
         print(
             f"Converting y_validate from one-hot (shape {y_validate.shape}) to sparse..."
         )
         y_validate = np.argmax(y_validate, axis=1)
 
-    # Adjust if labels are 1-indexed
     all_labels_for_check = np.concatenate((y_train, y_validate))
     min_label = np.min(all_labels_for_check)
     max_label = np.max(all_labels_for_check)
     NUM_CLASSES = len(np.unique(all_labels_for_check))
 
     if max_label >= NUM_CLASSES:
-        print(f"Warning: Labels appear to be 1-indexed. Converting to 0-indexed.")
+        print("Warning: Labels appear to be 1-indexed. Converting to 0-indexed.")
         y_train = y_train - 1
         y_validate = y_validate - 1
         NUM_CLASSES = len(np.unique(np.concatenate((y_train, y_validate))))
-    # --- END LABEL FIX ---
 
     print(f"Final x_train shape: {x_train.shape}")
     print(f"Final y_train shape: {y_train.shape}")
     print(f"Final x_validate shape: {x_validate.shape}")
     print(f"Final y_validate shape: {y_validate.shape}")
-    print(
-        f"Final Input shape for model: {INPUT_SHAPE}"
-    )  # INPUT_SHAPE should still be (96, 96, 3)
+    print(f"Final Input shape for model: {INPUT_SHAPE}")
     print(f"Final Number of classes: {NUM_CLASSES}")
 
 except Exception as e:
@@ -135,15 +144,22 @@ except Exception as e:
     sys.exit(1)
 
 # --- Model Definition ---
-base_model = MobileNetV2(input_shape=INPUT_SHAPE, include_top=False, weights="imagenet")
+# Input layer to keep things explicit
+inp = Input(shape=INPUT_SHAPE, name="image_input")
+
+# Scale [0,1] -> [-1,1] for MobileNetV2
+x = Rescaling(scale=2.0, offset=-1.0, name="to_minus1_plus1")(inp)
+
+# Base model (imagenet weights expect 3-channel RGB and [-1,1] range)
+base_model = MobileNetV2(input_tensor=x, include_top=False, weights="imagenet")
 base_model.trainable = False
 
-# Add custom layers
 x = base_model.output
-x = GlobalAveragePooling2D()(x)
-x = Dropout(0.5)(x)
-predictions = Dense(NUM_CLASSES, activation="softmax")(x)
-model = Model(inputs=base_model.input, outputs=predictions)
+x = GlobalAveragePooling2D(name="gap")(x)
+x = Dropout(0.5, name="dropout")(x)
+predictions = Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
+
+model = Model(inputs=inp, outputs=predictions)
 
 # --- Compile Model ---
 optimizer = Adam(learning_rate=args.learning_rate)

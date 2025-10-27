@@ -63,6 +63,8 @@ def _best_wh_from_pixels(pixels: int) -> Tuple[int, int]:
 
 def _ensure_float01(arr: np.ndarray) -> np.ndarray:
     a = arr.astype(np.float32)
+    if a.size == 0:
+        return a
     if a.max() > 1.5:
         a = a / 255.0
     return np.clip(a, 0.0, 1.0)
@@ -85,6 +87,15 @@ def generate_features(
     # ---- Read target size from parameters.json ----
     Wt = _as_int("img_width", kwargs.get("img-width", 96))
     Ht = _as_int("img_height", kwargs.get("img-height", 96))
+
+    # ---- Force model-compatible output channels (default 3 for RGB CNNs) ----
+    # Set "out_channels" in parameters.json / UI if you want 1 instead
+    Cout_raw = kwargs.get("out_channels", 3)
+    try:
+        Cout = int(Cout_raw)
+    except Exception:
+        Cout = 3
+    Cout = 3 if Cout == 3 else 1  # sanitize to {1,3}
 
     # ---- Flatten & basic info ----
     raw = np.asarray(raw_data)
@@ -123,23 +134,31 @@ def generate_features(
         )
 
     # ---- Resize (OpenCV expects (width, height)) ----
-    if Cin == 1:
-        resized = cv2.resize(img, (Wt, Ht), interpolation=cv2.INTER_AREA)
-        if resized.ndim == 2:
-            resized = resized[..., None]  # keep shape (H, W, 1)
-    else:
-        resized = cv2.resize(img, (Wt, Ht), interpolation=cv2.INTER_AREA)
+    resized = cv2.resize(img, (Wt, Ht), interpolation=cv2.INTER_AREA)
+    if Cin == 1 and resized.ndim == 2:
+        resized = resized[..., None]  # (H, W, 1)
+
+    # ---- Convert channels to match model contract (Cout) ----
+    if resized.shape[2] == 1 and Cout == 3:
+        # Grayscale -> RGB by replication
+        resized = np.repeat(resized, 3, axis=2)
+    elif resized.shape[2] == 3 and Cout == 1:
+        # RGB -> Grayscale (luma)
+        y = (
+            0.299 * resized[..., 0] + 0.587 * resized[..., 1] + 0.114 * resized[..., 2]
+        ).astype(np.float32)
+        resized = y[..., None]
 
     # ---- Scale to [0,1] ----
     resized = _ensure_float01(resized)
 
-    # Return the 3D features as a nested list.
-    features = resized.astype(np.float32)
+    # ---- Flatten to 1D Python list for EI ----
+    features = resized.astype(np.float32).reshape(-1).tolist()
 
     # ----- Build output config -----
     output_config = {
         "type": "image",
-        "shape": {"width": Wt, "height": Ht, "channels": Cin},
+        "shape": {"width": Wt, "height": Ht, "channels": Cout},
     }
 
     return {
