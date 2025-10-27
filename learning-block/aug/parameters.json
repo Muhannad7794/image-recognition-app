@@ -27,18 +27,86 @@
                 "name": "epochs",
                 "type": "int",
                 "label": "Number of epochs",
-                "defaultValue": 20,
+                "defaultValue": 40,
                 "minimum": 1,
                 "category": "training"
             },
             {
                 "name": "learning_rate",
                 "type": "float",
-                "label": "Learning rate",
-                "defaultValue": 0.0005,
+                "label": "Base learning rate",
+                "defaultValue": 0.0001,
                 "minimum": 0.00001,
                 "maximum": 0.1,
                 "category": "training"
+            },
+            {
+                "name": "batch_size",
+                "type": "int",
+                "label": "Batch size",
+                "defaultValue": 64,
+                "minimum": 8,
+                "category": "training"
+            },
+            {
+                "name": "warmup_epochs",
+                "type": "int",
+                "label": "Warmup epochs",
+                "defaultValue": 6,
+                "minimum": 0,
+                "category": "training"
+            },
+            {
+                "name": "unfreeze_pct",
+                "type": "float",
+                "label": "Backbone unfreeze percentage (0-1)",
+                "defaultValue": 0.7,
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "category": "training"
+            },
+            {
+                "name": "weight_decay",
+                "type": "float",
+                "label": "AdamW weight decay",
+                "defaultValue": 0.0001,
+                "minimum": 0.0,
+                "maximum": 0.1,
+                "category": "training"
+            },
+            {
+                "name": "label_smoothing",
+                "type": "float",
+                "label": "Label smoothing",
+                "defaultValue": 0.1,
+                "minimum": 0.0,
+                "maximum": 0.2,
+                "category": "training"
+            },
+            {
+                "name": "use_class_weights",
+                "type": "bool",
+                "label": "Use class weights",
+                "defaultValue": true,
+                "category": "training"
+            },
+            {
+                "name": "mixup_alpha",
+                "type": "float",
+                "label": "MixUp alpha",
+                "defaultValue": 0.2,
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "category": "augmentation"
+            },
+            {
+                "name": "cutmix_alpha",
+                "type": "float",
+                "label": "CutMix alpha",
+                "defaultValue": 0.2,
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "category": "augmentation"
             }
         ]
     }

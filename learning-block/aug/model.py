@@ -1,267 +1,262 @@
-# learning-block/aug/model.py  (AUG @96x96, robust I/O + warmup→finetune)
-import os, json, argparse, sys
-import numpy as np
+# model.py (AUG) — MobileNetV2 (96x96), balanced training, conservative aug
+import math
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
-from tensorflow.keras.callbacks import EarlyStopping
-
-# --- Args ---
-parser = argparse.ArgumentParser(description="AUG image classifier @96x96")
-parser.add_argument("--data-directory", type=str, required=True)
-parser.add_argument("--epochs", type=int, required=True)  # e.g., 50
-parser.add_argument("--learning-rate", type=float, required=True)  # e.g., 1e-3 (warmup)
-parser.add_argument("--out-directory", type=str, required=True)
-args, _ = parser.parse_known_args()
-
-IMG_HEIGHT = 96
-IMG_WIDTH = 96
-CHANNELS = 3
-INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
-
-WARMUP_EPOCHS = 8
-LABEL_SMOOTH = 0.10
-BATCH_SIZE = 64
-FINE_TUNE_FRACTION = 0.40  # unfreeze the top 40% of backbone
-FT_BASE_LR = 1e-4  # starting LR for cosine during finetune
-
-print(f"[AUG] Data dir: {args.data_directory}")
 
 
-# ---------- Resolve files under --data-directory ----------
-def _pick(root: str, names: list[str]) -> str:
-    for n in names:
-        p = os.path.join(root, n)
-        if os.path.exists(p):
-            return p
-    raise FileNotFoundError(f"None of {names} found under {root}")
+# ---------- Schedules ----------
+class WarmupCosine(tf.keras.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, base_lr, warmup_epochs, steps_per_epoch, total_epochs):
+        super().__init__()
+        self.base_lr = base_lr
+        self.warmup_steps = max(1, warmup_epochs * steps_per_epoch)
+        self.total_steps = max(self.warmup_steps + 1, total_epochs * steps_per_epoch)
 
-
-x_train_path = _pick(args.data_directory, ["X_split_train.npy", "X_train_features.npy"])
-y_train_path = _pick(args.data_directory, ["Y_split_train.npy", "y_train.npy"])
-x_val_path = _pick(args.data_directory, ["X_split_test.npy", "X_validate_features.npy"])
-y_val_path = _pick(args.data_directory, ["Y_split_test.npy", "y_validate.npy"])
-
-print("[AUG] Dir listing:", sorted(os.listdir(args.data_directory)))
-print(
-    f"[AUG] Train X: {os.path.basename(x_train_path)} | Train y: {os.path.basename(y_train_path)}"
-)
-print(
-    f"[AUG] Val   X: {os.path.basename(x_val_path)}   | Val   y: {os.path.basename(y_val_path)}"
-)
-
-# ---------- Load ----------
-x_train = np.load(x_train_path)
-y_train = np.load(y_train_path)
-x_val = np.load(x_val_path)
-y_val = np.load(y_val_path)
-
-print(f"[AUG] x_train (raw): {x_train.shape}, x_val (raw): {x_val.shape}")
-print(f"[AUG] y_train (raw): {y_train.shape}, y_val (raw): {y_val.shape}")
-
-# ---------- Ensure NHWC (N,96,96,3) ----------
-expected_feat_len = IMG_HEIGHT * IMG_WIDTH * CHANNELS
-
-
-def _to_nhwc(x: np.ndarray, name: str) -> np.ndarray:
-    if x.ndim == 2:
-        if x.shape[1] != expected_feat_len:
-            raise ValueError(
-                f"[AUG][FATAL] {name} feature len {x.shape[1]} != {expected_feat_len}"
-            )
-        x = x.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
-    if x.ndim != 4 or x.shape[1:] != (IMG_HEIGHT, IMG_WIDTH, CHANNELS):
-        raise ValueError(
-            f"[AUG][FATAL] Bad tensor shape for {name}: {x.shape}, expected (N,{IMG_HEIGHT},{IMG_WIDTH},{CHANNELS})"
+    def __call__(self, step):
+        step = tf.cast(step, tf.float32)
+        # Linear warmup
+        lr_warm = self.base_lr * (step / tf.cast(self.warmup_steps, tf.float32))
+        # Cosine after warmup
+        progress = (step - self.warmup_steps) / tf.cast(
+            self.total_steps - self.warmup_steps, tf.float32
         )
-    return x.astype(np.float32, copy=False)
+        progress = tf.clip_by_value(progress, 0.0, 1.0)
+        lr_cos = 0.5 * self.base_lr * (1 + tf.cos(math.pi * progress))
+        return tf.where(step < self.warmup_steps, lr_warm, lr_cos)
 
 
-x_train = _to_nhwc(x_train, "x_train")
-x_val = _to_nhwc(x_val, "x_val")
+# ---------- Optional MixUp/CutMix ----------
+def _sample_beta(alpha, shape):
+    if alpha <= 0.0:
+        return tf.ones(shape)
+    gamma1 = tf.random.gamma(shape=shape, alpha=alpha)
+    gamma2 = tf.random.gamma(shape=shape, alpha=alpha)
+    lam = gamma1 / (gamma1 + gamma2)
+    return lam
 
-# ---------- Label-space checks BEFORE argmax ----------
-if y_train.ndim == 2 and y_val.ndim == 2:
-    if y_train.shape[1] != y_val.shape[1]:
-        raise ValueError(
-            f"[AUG][FATAL] Label-space mismatch: train one-hot width={y_train.shape[1]} "
-            f"vs val width={y_val.shape[1]}. Recalculate features for ALL data."
-        )
-    NUM_CLASSES = int(y_train.shape[1])
-    y_train = y_train.argmax(axis=1)
-    y_val = y_val.argmax(axis=1)
-elif y_train.ndim == 1 and y_val.ndim == 1:
-    NUM_CLASSES = int(max(y_train.max(), y_val.max()) + 1)
-else:
-    raise ValueError(
-        f"[AUG][FATAL] Inconsistent label dims: train={y_train.ndim}D, val={y_val.ndim}D"
+
+def apply_mixup(images, labels, alpha):
+    if alpha <= 0.0:
+        return images, labels
+    bs = tf.shape(images)[0]
+    lam = _sample_beta(alpha, (bs, 1, 1, 1))
+    index = tf.random.shuffle(tf.range(bs))
+    mixed_x = lam * images + (1 - lam) * tf.gather(images, index)
+    lam_lbl = tf.reshape(lam[:, 0, 0, 0], (bs, 1))
+    mixed_y = lam_lbl * labels + (1 - lam_lbl) * tf.gather(labels, index)
+    return mixed_x, mixed_y
+
+
+def apply_cutmix(images, labels, alpha):
+    if alpha <= 0.0:
+        return images, labels
+    bs = tf.shape(images)[0]
+    h = tf.shape(images)[1]
+    w = tf.shape(images)[2]
+    lam = _sample_beta(alpha, (bs, 1))
+    rx = tf.cast(tf.random.uniform((bs,)) * tf.cast(w, tf.float32), tf.int32)
+    ry = tf.cast(tf.random.uniform((bs,)) * tf.cast(h, tf.float32), tf.int32)
+    rw = tf.cast(tf.sqrt(1 - lam[:, 0]) * tf.cast(w, tf.float32), tf.int32)
+    rh = tf.cast(tf.sqrt(1 - lam[:, 0]) * tf.cast(h, tf.float32), tf.int32)
+
+    x1 = tf.clip_by_value(rx - rw // 2, 0, w)
+    y1 = tf.clip_by_value(ry - rh // 2, 0, h)
+    x2 = tf.clip_by_value(rx + rw // 2, 0, w)
+    y2 = tf.clip_by_value(ry + rh // 2, 0, h)
+
+    index = tf.random.shuffle(tf.range(bs))
+    images2 = tf.gather(images, index)
+    labels2 = tf.gather(labels, index)
+
+    def cut_one(img, img2, xi1, yi1, xi2, yi2):
+        mask = tf.ones((yi2 - yi1, xi2 - xi1, tf.shape(img)[-1]), img.dtype)
+        pad_top = yi1
+        pad_left = xi1
+        pad_bottom = tf.shape(img)[0] - yi2
+        pad_right = tf.shape(img)[1] - xi2
+        patch = tf.pad(mask, [[pad_top, pad_bottom], [pad_left, pad_right], [0, 0]])
+        return img * (1 - patch) + img2 * patch
+
+    out_imgs = []
+    new_lams = []
+    for i in range(
+        bs.numpy() if isinstance(bs, tf.Tensor) and not tf.executing_eagerly() else 0
+    ):
+        pass  # (Graph mode safe implementation below)
+
+    # Vectorized cutmix (graph friendly)
+    batch_indices = tf.range(bs)
+    x1e = tf.expand_dims(x1, 1)
+    y1e = tf.expand_dims(y1, 1)
+    x2e = tf.expand_dims(x2, 1)
+    y2e = tf.expand_dims(y2, 1)
+    # Build binary masks
+    xr = tf.range(w)
+    yr = tf.range(h)
+    X, Y = tf.meshgrid(xr, yr)
+    X = tf.expand_dims(tf.expand_dims(X, 0), -1)  # [1,H,W,1]
+    Y = tf.expand_dims(tf.expand_dims(Y, 0), -1)
+    in_x = (X >= tf.cast(x1e[:, None, None, :], X.dtype)) & (
+        X < tf.cast(x2e[:, None, None, :], X.dtype)
     )
-
-# Optional: shift if both are 1-indexed
-if y_train.min() == 1 and y_val.min() == 1:
-    print("[AUG] Shifting labels 1-indexed → 0-indexed.")
-    y_train -= 1
-    y_val -= 1
-
-# Sanity on label ranges
-if (y_train.min() < 0) or (y_val.min() < 0):
-    raise ValueError("[AUG][FATAL] Negative class index found.")
-if (y_train.max() >= NUM_CLASSES) or (y_val.max() >= NUM_CLASSES):
-    raise ValueError(
-        f"[AUG][FATAL] Class index out of range w.r.t NUM_CLASSES={NUM_CLASSES}"
+    in_y = (Y >= tf.cast(y1e[:, None, None, :], Y.dtype)) & (
+        Y < tf.cast(y2e[:, None, None, :], Y.dtype)
     )
+    box = tf.cast(in_x & in_y, images.dtype)  # [B,H,W,1]
 
-# Class weights (balanced)
-class_counts = np.bincount(y_train.astype(int), minlength=NUM_CLASSES)
-inv_freq = class_counts.max() / np.maximum(class_counts, 1)
-class_weight = {i: float(inv_freq[i]) for i in range(NUM_CLASSES)}
+    mixed = images * (1 - box) + tf.gather(images, index) * box
+    box_area = tf.reduce_mean(box, axis=[1, 2, 3])  # fraction replaced
+    lam_eff = 1.0 - box_area
+    lam_eff = tf.reshape(lam_eff, (-1, 1))
+    mixed_y = lam_eff * labels + (1 - lam_eff) * tf.gather(labels, index)
+    return mixed, mixed_y
 
-print(f"[AUG] Final INPUT_SHAPE={INPUT_SHAPE}, NUM_CLASSES={NUM_CLASSES}")
-print(f"[AUG] x_train: {x_train.shape}, x_val: {x_val.shape}")
-print(f"[AUG] y_train: {y_train.shape}, y_val: {y_val.shape}")
-print(f"[AUG] Class counts (first 20): {class_counts[:20]}")
-
-
-# ---------- tf.data (to one-hot for label smoothing) ----------
-def to_one_hot(y):
-    return tf.one_hot(tf.cast(y, tf.int32), NUM_CLASSES)
-
-
-augment = keras.Sequential(
-    [
-        layers.RandomFlip("horizontal"),
-        layers.RandomRotation(0.10),
-        layers.RandomZoom(0.15),
-        layers.RandomTranslation(0.10, 0.10),
-        layers.RandomContrast(0.20),
-    ],
-    name="augment",
-)
-
-
-def make_ds(x, y, training=True):
-    ds = tf.data.Dataset.from_tensor_slices((x, y))
-    if training:
-        ds = ds.shuffle(2048, reshuffle_each_iteration=True)
-    ds = ds.map(
-        lambda xi, yi: (xi, to_one_hot(yi)), num_parallel_calls=tf.data.AUTOTUNE
-    )
-    ds = ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
-    return ds
-
-
-train_ds = make_ds(x_train, y_train, training=True)
-val_ds = make_ds(x_val, y_val, training=False)
 
 # ---------- Model ----------
-inputs = layers.Input(shape=INPUT_SHAPE, name="image_input")
-x = augment(inputs)  # active only in training
-x = layers.Rescaling(scale=2.0, offset=-1.0)(x)  # [-1, 1] like baseline
+def build_model(
+    input_shape, num_classes, unfreeze_pct=0.7, weight_decay=1e-4, dropout=0.3
+):
+    inputs = keras.Input(shape=input_shape)
 
-weights_path = os.path.expanduser(
-    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5"
-)
-if os.path.exists(weights_path):
-    base = keras.applications.MobileNetV2(
-        input_shape=INPUT_SHAPE, include_top=False, weights=weights_path
+    # 0..1 -> [-1,1] for MobileNetV2
+    x = layers.Rescaling(1.0 / 127.5, offset=-1.0)(inputs)
+
+    # Conservative on-model augmentation
+    aug = keras.Sequential(
+        [
+            layers.RandomFlip("horizontal"),
+            layers.RandomRotation(0.05),
+            layers.RandomZoom(0.1),
+            layers.RandomContrast(0.1),
+        ]
     )
-else:
-    base = keras.applications.MobileNetV2(
-        input_shape=INPUT_SHAPE, include_top=False, weights="imagenet"
+    x = aug(x)
+
+    base = tf.keras.applications.MobileNetV2(
+        input_shape=input_shape, include_top=False, weights="imagenet"
     )
-base.trainable = False  # warmup: freeze
+    base.trainable = False  # will unfreeze later
 
-x = base(x, training=False)
-x = layers.GlobalAveragePooling2D(name="gap")(x)
-x = layers.Dropout(0.3, name="dropout")(x)
-outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
-model = keras.Model(inputs, outputs)
+    x = base(x, training=False)
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.Dense(
+        256, kernel_regularizer=keras.regularizers.l2(weight_decay), activation="relu"
+    )(x)
+    x = layers.Dropout(dropout)(x)
+    logits = layers.Dense(
+        num_classes,
+        activation=None,
+        kernel_regularizer=keras.regularizers.l2(weight_decay),
+    )(x)
 
-# Loss/metrics: label smoothing => categorical targets
-loss = keras.losses.CategoricalCrossentropy(label_smoothing=LABEL_SMOOTH)
-metrics = [
-    keras.metrics.CategoricalAccuracy(name="acc"),
-    keras.metrics.TopKCategoricalAccuracy(k=5, name="top5"),
-]
+    model = keras.Model(inputs, logits, name="aug_mnetv2_96")
+    return model, base
 
-# ---------- Phase 1: warmup ----------
-print(f"[AUG] Warmup {WARMUP_EPOCHS} epochs @ lr={args.learning_rate}")
-model.compile(
-    optimizer=keras.optimizers.Adam(args.learning_rate), loss=loss, metrics=metrics
-)
-es = EarlyStopping(
-    monitor="val_loss", patience=10, restore_best_weights=True, verbose=1
-)
 
-history = model.fit(
-    train_ds,
-    validation_data=val_ds,
-    epochs=WARMUP_EPOCHS,
-    class_weight=class_weight,
-    callbacks=[es],
-    verbose=2,
-)
+def compile_and_train(
+    x_train, y_train, x_val, y_val, num_classes, args, class_weights=None
+):
+    bs = int(args.get("batch_size", 64))
+    epochs = int(args.get("epochs", 30))
+    base_lr = float(args.get("learning_rate", 1e-4))
+    warmup_epochs = int(args.get("warmup_epochs", 6))
+    unfreeze_pct = float(args.get("unfreeze_pct", 0.7))
+    weight_decay = float(args.get("weight_decay", 1e-4))
+    label_smoothing = float(args.get("label_smoothing", 0.1))
+    mixup_alpha = float(args.get("mixup_alpha", 0.2))
+    cutmix_alpha = float(args.get("cutmix_alpha", 0.2))
 
-# ---------- Phase 2: fine-tune (unfreeze top 40%) ----------
-n_layers = len(base.layers)
-cut = int(n_layers * (1.0 - FINE_TUNE_FRACTION))
-for i, layer in enumerate(base.layers):
-    layer.trainable = i >= cut
+    input_shape = x_train.shape[1:]
+    model, base = build_model(input_shape, num_classes, unfreeze_pct, weight_decay)
 
-steps_per_epoch = int(np.ceil(len(x_train) / BATCH_SIZE))
-decay_steps = steps_per_epoch * max(args.epochs - WARMUP_EPOCHS, 1)
-cosine_lr = keras.optimizers.schedules.CosineDecay(
-    initial_learning_rate=FT_BASE_LR, decay_steps=decay_steps
-)
+    steps_per_epoch = max(1, math.ceil(len(x_train) / bs))
+    lr_schedule = WarmupCosine(base_lr, warmup_epochs, steps_per_epoch, epochs)
+    try:
+        optimizer = tf.keras.optimizers.AdamW(
+            learning_rate=lr_schedule, weight_decay=weight_decay
+        )
+    except TypeError:
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
-print(
-    f"[AUG] Finetune up to epoch {args.epochs} with cosine LR (start {FT_BASE_LR}), unfreezing top {FINE_TUNE_FRACTION*100:.0f}%"
-)
-model.compile(optimizer=keras.optimizers.Adam(cosine_lr), loss=loss, metrics=metrics)
+    loss = tf.keras.losses.CategoricalCrossentropy(
+        from_logits=True, label_smoothing=label_smoothing
+    )
+    top5 = tf.keras.metrics.TopKCategoricalAccuracy(k=5, name="top5")
 
-history2 = model.fit(
-    train_ds,
-    validation_data=val_ds,
-    initial_epoch=len(history.epoch),
-    epochs=args.epochs,
-    class_weight=class_weight,
-    callbacks=[es],
-    verbose=2,
-)
+    model.compile(
+        optimizer=optimizer,
+        loss=loss,
+        metrics=[tf.keras.metrics.CategoricalAccuracy(name="acc"), top5],
+    )
 
-# ---------- Save (SavedModel + TFLite) ----------
-out_dir = args.out_directory
-saved_model_dir = os.path.join(out_dir, "saved_model")
-print(f"[AUG] Saving SavedModel -> {saved_model_dir}")
-model.save(saved_model_dir)
+    # tf.data pipeline + optional MixUp/CutMix after warmup
+    train_ds = (
+        tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        .shuffle(8 * bs)
+        .batch(bs)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+    val_ds = (
+        tf.data.Dataset.from_tensor_slices((x_val, y_val))
+        .batch(bs)
+        .prefetch(tf.data.AUTOTUNE)
+    )
 
-tflite_path = os.path.join(out_dir, "model.tflite")
-print(f"[AUG] Converting to TFLite (float32) -> {tflite_path}")
-try:
-    conv = tf.lite.TFLiteConverter.from_keras_model(model)
-    conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
-    tflite_model = conv.convert()
-    with open(tflite_path, "wb") as f:
-        f.write(tflite_model)
-    print("[AUG] TFLite model written.")
-except Exception as e:
-    print(f"[AUG] Primary TFLite conversion failed: {e}")
-    print("[AUG] Retrying from SavedModel ...")
-    conv = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
-    conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
-    tflite_model = conv.convert()
-    with open(tflite_path, "wb") as f:
-        f.write(tflite_model)
-    print("[AUG] TFLite model written (from SavedModel).")
+    # Warmup phase with frozen base
+    hist_parts = []
+    warm_hist = model.fit(
+        train_ds.take(steps_per_epoch * warmup_epochs),
+        validation_data=val_ds,
+        epochs=warmup_epochs,
+        class_weight=class_weights,
+        verbose=2,
+    )
+    hist_parts.append(warm_hist.history)
 
-# Save merged history
-hist_path = os.path.join(out_dir, "training_history.json")
-with open(hist_path, "w") as f:
-    h = {}
-    for k, v in history.history.items():
-        h[k] = list(v)
-    for k, v in history2.history.items():
-        h.setdefault(k, [])
-        h[k].extend(v)
-    json.dump(h, f, default=lambda o: float(o))
-print("[AUG] Model and merged history saved.")
+    # Unfreeze top N% of layers
+    n_layers = len(base.layers)
+    cutoff = int((1.0 - unfreeze_pct) * n_layers)
+    for i, layer in enumerate(base.layers):
+        layer.trainable = i >= cutoff
+
+    # Re-compile (BNs now trainable in unfrozen part)
+    model.compile(
+        optimizer=optimizer,
+        loss=loss,
+        metrics=[tf.keras.metrics.CategoricalAccuracy(name="acc"), top5],
+    )
+
+    # Fine-tune with optional MixUp/CutMix
+    def augment_batch(images, labels):
+        images, labels = apply_mixup(images, labels, mixup_alpha)
+        images, labels = apply_cutmix(images, labels, cutmix_alpha)
+        return images, labels
+
+    aug_train_ds = (
+        tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        .shuffle(8 * bs)
+        .batch(bs)
+        .map(augment_batch, num_parallel_calls=tf.data.AUTOTUNE)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+
+    callbacks = [
+        tf.keras.callbacks.EarlyStopping(
+            monitor="val_loss", patience=8, restore_best_weights=True, min_delta=0.002
+        )
+    ]
+
+    finetune_hist = model.fit(
+        aug_train_ds,
+        validation_data=val_ds,
+        epochs=epochs,
+        initial_epoch=warmup_epochs,
+        class_weight=class_weights,
+        callbacks=callbacks,
+        verbose=2,
+    )
+    hist_parts.append(finetune_hist.history)
+
+    return model, hist_parts
