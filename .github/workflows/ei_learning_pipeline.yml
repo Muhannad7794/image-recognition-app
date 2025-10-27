@@ -5,7 +5,7 @@ on:
   push:
     branches: [ learn, master, edit ]
     paths:
-      - 'learning-blocks/**'
+      - 'learning-block/**'
 
 jobs:
   push-blocks:
