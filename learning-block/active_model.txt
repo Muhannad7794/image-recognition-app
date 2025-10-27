@@ -1,1 +1,1 @@
-mobilenetv2_96_baseline
+mobilenetv2_96_aug

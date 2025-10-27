@@ -2,7 +2,7 @@
     "version": 1,
     "type": "machine-learning",
     "info": {
-        "name": "Model Training Block",
+        "name": "Model Training Block AUGMENT",
         "description": "Transfer learning model based on MobileNetV2 to classify images of home office objects based on a Kaggle dataset.",
         "operatesOn": "image",
         "imageInputScaling": "0..1",

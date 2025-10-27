@@ -23,16 +23,13 @@ RUN mkdir -p $KERAS_HOME/models && \
 # 6) Copy requirements first (for caching)
 COPY requirements.txt .
 
-# 7) Install TF-compatible numeric stack FIRST (prevents numpy 2.x upgrades)
-#    TensorFlow 2.15 is compatible with numpy 1.26.x and ml-dtypes <0.5
-RUN pip install --no-cache-dir "numpy==1.26.4" "ml-dtypes==0.3.2"
 
-# 8) Now install the rest, but DO NOT let it upgrade numpy/ml-dtypes
+# 7) Now install the rest, but DO NOT let it upgrade numpy/ml-dtypes
 #    If your requirements include those pins, this is still safe.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 9) Copy the rest of your code
+# 8) Copy the rest of your code
 COPY . .
 
-# 10) Run training entrypoint (EI adds args)
+# 9) Run training entrypoint (EI adds args)
 ENTRYPOINT ["python3", "dispatch.py"]
