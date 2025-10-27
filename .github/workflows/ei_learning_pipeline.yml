@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        variant: [ baseline, aug ]  # add/remove variants as needed
+        variant: [ baseline, aug, finetune ]  # add/remove variants as needed
     steps:
       - name: Checkout
         uses: actions/checkout@v4
