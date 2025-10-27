@@ -2,7 +2,6 @@
 from typing import Any, Dict, List, Tuple
 import numpy as np
 
-# Lazy import so the server can start and give a clear error if OpenCV is missing
 try:
     import cv2  # type: ignore
 except Exception as e:
@@ -10,7 +9,6 @@ except Exception as e:
         "OpenCV is not available in the container. "
         "Ensure 'opencv-python-headless' is installed in the Docker image."
     ) from e
-
 
 # ---------- Utilities ----------
 
@@ -28,13 +26,12 @@ def _as_int(name: str, value: Any, lo: int = 1, hi: int = 8192) -> int:
 def _infer_channels(axes: List[str] | None, raw_len: int) -> int:
     if axes:
         a = [str(x).lower() for x in axes]
-        if {"r", "g", "b"}.issubset(set(a)):  # explicit RGB
+        if {"r", "g", "b"}.issubset(set(a)):
             return 3
         if any(x in {"px", "gray", "grey", "grayscale"} for x in a) and len(a) == 1:
             return 1
         if len(a) in (1, 3):
             return len(a)
-    # heuristic: prefer 3 if it divides, else 1
     return 3 if (raw_len % 3 == 0) else 1
 
 
@@ -68,7 +65,22 @@ def _ensure_float01(arr: np.ndarray) -> np.ndarray:
     return np.clip(a, 0.0, 1.0)
 
 
-# ---------- Main hook called by EI server ----------
+# Try a candidate (Cin, Hin, Win) and return resized image and its std
+def _try_candidate(
+    flat: np.ndarray, Cin: int, Hin: int, Win: int, Wt: int, Ht: int
+) -> Tuple[np.ndarray, float]:
+    try:
+        img = flat.astype(np.float32).reshape(Hin, Win, Cin)
+    except Exception:
+        return np.empty((0,)), -1.0
+    res = cv2.resize(img, (Wt, Ht), interpolation=cv2.INTER_AREA)
+    if res.ndim == 2:
+        res = res[..., None]
+    std = float(np.std(res))
+    return res, std
+
+
+# ---------- Main hook ----------
 
 
 def generate_features(
@@ -77,84 +89,84 @@ def generate_features(
     raw_data: List[float] | np.ndarray,
     axes: List[str] | None,
     sampling_freq: float | None,
-    img_width: int | None = None,
+    img_width: int | None = None,  # EI may pass these; prefer when present
     img_height: int | None = None,
     **kwargs,
 ) -> Dict[str, Any]:
 
-    # ---- Target output size ----
+    # Target output size
     Wt = _as_int("img_width", kwargs.get("img-width", 96))
     Ht = _as_int("img_height", kwargs.get("img-height", 96))
 
-    # ---- Desired OUTPUT channels (guaranteed by this block) ----
-    Cout_raw = kwargs.get("out_channels", 3)
-    try:
-        Cout = int(Cout_raw)
-    except Exception:
-        Cout = 3
-    Cout = 3 if Cout == 3 else 1  # sanitize to {1,3}
+    # Desired OUTPUT channels (guaranteed)
+    Cout = 3 if int(kwargs.get("out_channels", 3)) == 3 else 1
 
-    # ---- Flatten incoming buffer ----
-    raw = np.asarray(raw_data)
-    flat = raw.reshape(-1) if raw.ndim > 1 else raw
+    # Flatten input
+    flat = np.asarray(raw_data).reshape(-1)
     N = int(flat.size)
 
-    # ---- Determine INPUT channels robustly ----
+    # INPUT channels preference
     Cin_pref = kwargs.get("channels") or kwargs.get("input_channels")
     if Cin_pref in (1, 3):
         Cin_pref = int(Cin_pref)
-        Cin = Cin_pref if (N % Cin_pref == 0) else (3 if (N % 3 == 0) else 1)
     else:
-        Cin = _infer_channels(axes, N)
-        if N % Cin != 0:
-            Cin = 3 if (N % 3 == 0) else 1
+        Cin_pref = _infer_channels(axes, N)
 
-    # ---- Determine INPUT W,H ----
-    Win = kwargs.get("width") or kwargs.get("input_width")
-    Hin = kwargs.get("height") or kwargs.get("input_height")
-    if Win is None or Hin is None:
-        pixels = N // Cin  # integer division is safe after Cin fix
-        Hin, Win = _best_wh_from_pixels(pixels)
-    Win = _as_int("input_width", Win)
-    Hin = _as_int("input_height", Hin)
+    # INPUT size (prefer EI-provided function args first)
+    Win_kw = kwargs.get("width") or kwargs.get("input_width")
+    Hin_kw = kwargs.get("height") or kwargs.get("input_height")
+    Win_in = Win_kw or img_width
+    Hin_in = Hin_kw or img_height
 
-    # ---- Reshape to HxWxC ----
-    try:
-        img = flat.astype(np.float32).reshape(Hin, Win, Cin)
-    except Exception as e:
-        raise ValueError(
-            f"Could not reshape raw data to (H={Hin}, W={Win}, C={Cin}): {e}"
-        )
+    # Build candidate list for Cin ∈ {1,3} that divide N
+    candidates = []
+    for Cin_try in (Cin_pref, 3 if Cin_pref != 3 else 1):
+        if Cin_try in (1, 3) and N % Cin_try == 0:
+            pixels = N // Cin_try
+            Hin_try = _as_int("input_height", Hin_in) if Hin_in else None
+            Win_try = _as_int("input_width", Win_in) if Win_in else None
+            if Hin_try is None or Win_try is None:
+                Hin_try, Win_try = _best_wh_from_pixels(pixels)
+            candidates.append((Cin_try, Hin_try, Win_try))
 
-    # ---- Resize to target ----
-    resized = cv2.resize(img, (Wt, Ht), interpolation=cv2.INTER_AREA)
-    if resized.ndim == 2:
-        resized = resized[..., None]  # keep channel axis
+    # If nothing divisible, force Cin=1 as last resort
+    if not candidates:
+        Cin_try = 1
+        pixels = N // Cin_try
+        Hin_try, Win_try = _best_wh_from_pixels(pixels)
+        candidates.append((Cin_try, Hin_try, Win_try))
 
-    # ---- Convert channels to match OUTPUT contract (Cout) ----
+    # Evaluate candidates; pick the one with highest variance after resize
+    best_resized, best_std, best_cfg = None, -1.0, None
+    for Cin_try, Hin_try, Win_try in candidates:
+        res, s = _try_candidate(flat, Cin_try, Hin_try, Win_try, Wt, Ht)
+        if s > best_std:
+            best_resized, best_std, best_cfg = res, s, (Cin_try, Hin_try, Win_try)
+
+    # Use best
+    resized = (
+        best_resized if best_resized is not None else np.zeros((Ht, Wt, 1), np.float32)
+    )
+
+    # Convert to requested OUTPUT channels
     if resized.shape[2] == 1 and Cout == 3:
-        # gray -> RGB (replicate)
         resized = np.repeat(resized, 3, axis=2)
     elif resized.shape[2] == 3 and Cout == 1:
-        # RGB -> gray (luma)
         y = 0.299 * resized[..., 0] + 0.587 * resized[..., 1] + 0.114 * resized[..., 2]
         resized = y.astype(np.float32)[..., None]
 
-    # ---- Scale to [0,1] ----
+    # Normalize and flatten
     resized = _ensure_float01(resized)
-
-    # ---- Flatten to 1D list (EI expects length = W*H*C) ----
     features = resized.astype(np.float32).reshape(-1).tolist()
 
-    # ---- Final sanity: length must match product ----
+    # Final length check (prevents UI product errors)
     expected = Wt * Ht * Cout
     if len(features) != expected:
         raise ValueError(
-            f"Feature length mismatch: got {len(features)} but expected {expected} "
-            f"(width={Wt}, height={Ht}, channels={Cout})."
+            f"Feature length mismatch: got {len(features)} vs expected {expected} "
+            f"(width={Wt}, height={Ht}, channels={Cout}, cfg={best_cfg}, std={best_std:.6f})"
         )
 
-    # ---- Output config ----
     output_config = {
         "type": "image",
         "shape": {"width": Wt, "height": Ht, "channels": Cout},
