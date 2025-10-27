@@ -35,4 +35,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 10) Run training entrypoint (EI adds args)
-ENTRYPOINT ["python3", "model.py"]
+ENTRYPOINT ["python3", "dispatch.py"]
