@@ -31,115 +31,88 @@ IMG_WIDTH = 96
 CHANNELS = 3  # <- keep in sync with parameters.json: out_channels = 3
 INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
 
-# --- Load Data using NumPy ---
+# --- Load Data using NumPy (robust & symmetric) ---
 print(f"Loading data from directory: {args.data_directory}")
-try:
-    x_train_path = os.path.join(args.data_directory, "X_train_features.npy")
-    y_train_path = os.path.join(args.data_directory, "y_train.npy")
 
-    x_val_path = os.path.join(args.data_directory, "X_validate_features.npy")
-    y_val_path = os.path.join(args.data_directory, "y_validate.npy")
+# Prefer split-aware files for BOTH train and val
+paths = {
+    "x_train": ["X_split_train.npy", "X_train_features.npy"],
+    "y_train": ["Y_split_train.npy", "y_train.npy"],
+    "x_val": ["X_split_test.npy", "X_validate_features.npy"],
+    "y_val": ["Y_split_test.npy", "y_validate.npy"],
+}
 
-    # Fallback for old file names
-    if not os.path.exists(x_val_path):
-        print(
-            "Warning: X_validate_features.npy not found, falling back to X_split_test.npy"
-        )
-        x_val_path = os.path.join(args.data_directory, "X_split_test.npy")
-    if not os.path.exists(y_val_path):
-        print("Warning: y_validate.npy not found, falling back to Y_split_test.npy")
-        y_val_path = os.path.join(args.data_directory, "Y_split_test.npy")
 
-    print(f"Loading training features: {x_train_path}")
-    x_train = np.load(x_train_path)
+def pick(path_list):
+    for name in path_list:
+        p = os.path.join(args.data_directory, name)
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f"None of {path_list} found under {args.data_directory}")
 
-    print(f"Loading training labels: {y_train_path}")
-    y_train = np.load(y_train_path)
 
-    print(f"Loading validation features: {x_val_path}")
-    x_validate = np.load(x_val_path)
+x_train_path = pick(paths["x_train"])
+y_train_path = pick(paths["y_train"])
+x_val_path = pick(paths["x_val"])
+y_val_path = pick(paths["y_val"])
 
-    print(f"Loading validation labels: {y_val_path}")
-    y_validate = np.load(y_val_path)
+print("Directory listing:", sorted(os.listdir(args.data_directory)))
+print(f"Train X: {x_train_path}")
+print(f"Train y: {y_train_path}")
+print(f"Val   X: {x_val_path}")
+print(f"Val   y: {y_val_path}")
 
-    print("Data loaded successfully.")
-except FileNotFoundError as e:
-    print(f"\nError: A required .npy file was not found.\nDetails: {e}")
-    sys.exit(1)
-except Exception as e:
-    print(f"Error loading data from .npy files: {e}")
-    sys.exit(1)
+x_train = np.load(x_train_path)
+y_train = np.load(y_train_path)
+x_validate = np.load(x_val_path)
+y_validate = np.load(y_val_path)
 
-# --- Process Data and Determine Classes ---
-try:
-    print(f"Loaded x_train shape: {x_train.shape}")
-    print(f"Loaded x_validate shape: {x_validate.shape}")
+# --- Ensure NHWC shape and dtype ---
+expected_feat_len = IMG_HEIGHT * IMG_WIDTH * CHANNELS
 
-    expected_feat_len = IMG_HEIGHT * IMG_WIDTH * CHANNELS
 
-    # If flat (N, F), reshape to (N, H, W, C)
-    if x_train.ndim == 2:
-        if x_train.shape[1] != expected_feat_len:
-            print(
-                f"Error: x_train feature length {x_train.shape[1]} != expected {expected_feat_len}"
+def to_nhwc(x):
+    if x.ndim == 2:
+        if x.shape[1] != expected_feat_len:
+            raise ValueError(
+                f"Feature length {x.shape[1]} != expected {expected_feat_len}"
             )
-            sys.exit(1)
-        x_train = x_train.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
-    if x_validate.ndim == 2:
-        if x_validate.shape[1] != expected_feat_len:
-            print(
-                f"Error: x_validate feature length {x_validate.shape[1]} != expected {expected_feat_len}"
-            )
-            sys.exit(1)
-        x_validate = x_validate.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
-
-    # If already 4D, verify shape
-    if x_train.ndim != 4 or x_validate.ndim != 4:
-        print("Error: Unexpected data dimensions after reshape attempt.")
-        print(f"x_train shape: {x_train.shape}")
-        print(f"x_validate shape: {x_validate.shape}")
-        sys.exit(1)
-    if x_train.shape[1:] != INPUT_SHAPE or x_validate.shape[1:] != INPUT_SHAPE:
-        print("Error: Data shape does not match expected INPUT_SHAPE.")
-        print(
-            f"Expected: {INPUT_SHAPE}, got x_train: {x_train.shape[1:]}, x_validate: {x_validate.shape[1:]}"
+        x = x.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
+    if x.ndim != 4 or x.shape[1:] != (IMG_HEIGHT, IMG_WIDTH, CHANNELS):
+        raise ValueError(
+            f"Bad tensor shape: got {x.shape}, expected (N,{IMG_HEIGHT},{IMG_WIDTH},{CHANNELS})"
         )
-        sys.exit(1)
+    return x.astype(np.float32, copy=False)
 
-    # Ensure dtype float32
-    x_train = x_train.astype(np.float32, copy=False)
-    x_validate = x_validate.astype(np.float32, copy=False)
 
-    # --- LABEL FIX ---
-    if y_train.ndim == 2:
-        print(f"Converting y_train from one-hot (shape {y_train.shape}) to sparse...")
-        y_train = np.argmax(y_train, axis=1)
-    if y_validate.ndim == 2:
-        print(
-            f"Converting y_validate from one-hot (shape {y_validate.shape}) to sparse..."
+x_train = to_nhwc(x_train)
+x_validate = to_nhwc(x_validate)
+
+# --- Sanity checks BEFORE argmax ---
+if y_train.ndim == 2 and y_validate.ndim == 2:
+    if y_train.shape[1] != y_validate.shape[1]:
+        raise ValueError(
+            f"Label-space mismatch: train one-hot width={y_train.shape[1]} "
+            f"vs val width={y_validate.shape[1]}. Recalculate features for ALL data."
         )
-        y_validate = np.argmax(y_validate, axis=1)
+    NUM_CLASSES = y_train.shape[1]
+elif y_train.ndim == 1 and y_validate.ndim == 1:
+    NUM_CLASSES = int(max(y_train.max(), y_validate.max()) + 1)
+else:
+    raise ValueError(
+        f"Inconsistent label dimensions: train={y_train.ndim}D, val={y_validate.ndim}D"
+    )
 
-    all_labels_for_check = np.concatenate((y_train, y_validate))
-    NUM_CLASSES = len(np.unique(all_labels_for_check))
-    max_label = int(all_labels_for_check.max())
-    if max_label >= NUM_CLASSES:
-        print("Warning: Labels appear to be 1-indexed. Converting to 0-indexed.")
-        y_train = y_train - 1
-        y_validate = y_validate - 1
-        NUM_CLASSES = len(np.unique(np.concatenate((y_train, y_validate))))
+# Convert to sparse only AFTER the width check
+if y_train.ndim == 2:
+    y_train = y_train.argmax(axis=1)
+if y_validate.ndim == 2:
+    y_validate = y_validate.argmax(axis=1)
 
-    print(f"Final x_train shape: {x_train.shape}")
-    print(f"Final y_train shape: {y_train.shape}")
-    print(f"Final x_validate shape: {x_validate.shape}")
-    print(f"Final y_validate shape: {y_validate.shape}")
-    print(f"Final Input shape for model: {INPUT_SHAPE}")
-    print(f"Final Number of classes: {NUM_CLASSES}")
+# final diagnostics
+print(f"x_train: {x_train.shape}, x_val: {x_validate.shape}")
+print(f"y_train: {y_train.shape}, y_val: {y_validate.shape}, NUM_CLASSES={NUM_CLASSES}")
 
-except Exception as e:
-    print(f"Error processing data shapes: {e}")
-    traceback.print_exc()
-    sys.exit(1)
 
 # --- Model Definition ---
 inp = Input(shape=INPUT_SHAPE, name="image_input")
