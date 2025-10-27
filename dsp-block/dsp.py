@@ -114,8 +114,8 @@ def generate_features(
         Cin_candidates = [_infer_channels(axes, N), 3, 1]
 
     # ---- Optional size hints (prefer EI function args) ----
-    Win_hint = kwargs.get("width") or kwargs.get("input_width") or img_width
-    Hin_hint = kwargs.get("height") or kwargs.get("input_height") or img_height
+    Win_hint = kwargs.get("width") or kwargs.get("input_width")
+    Hin_hint = kwargs.get("height") or kwargs.get("input_height")
 
     # ---- Build candidate (Cin, Hin, Win) tuples ----
     tried = set()
