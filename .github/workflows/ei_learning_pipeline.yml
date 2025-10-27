@@ -1,40 +1,33 @@
 # .github/workflows/ei_training_pipeline.yml
-name: Push Edge Impulse Learning Block
+name: Push Edge Impulse Learning Blocks
 
-# Run this workflow when changes are pushed to the 'learn' or 'master' branches
 on:
   push:
-    branches:
-      - learn
-      - master
-      - dsp
-    paths: # Only run if files in the learning block directory change
-      - 'learning-block/**'
+    branches: [ learn, master, edit ]
+    paths:
+      - 'learning-blocks/**'
 
 jobs:
-  push-block:
-    runs-on: ubuntu-latest # Use a standard Linux runner
-
+  push-blocks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant: [ baseline, aug ]  # add/remove variants as needed
     steps:
-      # Step 1: Check out your repository code
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # Step 2: Set up Node.js (needed for the Edge Impulse CLI)
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
 
-      # Step 3: Install the Edge Impulse CLI
       - name: Install Edge Impulse CLI
         run: npm install -g edge-impulse-cli
 
-      # Step 4: Push the custom block to Edge Impulse
       - name: Push Custom Learning Block
-        working-directory: ./learning-block
-        run: |
-          edge-impulse-blocks push . \
-            --api-key ${{ secrets.EI_API_KEY }} \
+        working-directory: ./learning-blocks/${{ matrix.variant }}
         env:
           EDGE_IMPULSE_API_KEY: ${{ secrets.EI_API_KEY }}
+        run: |
+          edge-impulse-blocks push . --api-key ${{ secrets.EI_API_KEY }}

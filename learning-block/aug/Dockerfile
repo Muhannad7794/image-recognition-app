@@ -8,7 +8,7 @@ ENV KERAS_HOME=/root/.keras \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # 3) Workdir
-WORKDIR /learning-block-dockerized
+WORKDIR /learning-block-AUG
 
 # 4) System deps for wget over HTTPS
 RUN apt-get update && \
@@ -32,4 +32,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 9) Run training entrypoint (EI adds args)
-ENTRYPOINT ["python3", "dispatch.py"]
+ENTRYPOINT ["python3", "model.py"]

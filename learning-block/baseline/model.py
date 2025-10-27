@@ -1,4 +1,4 @@
-# learning-block/model.py
+# learning-block/baseline/model.py
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.layers import (

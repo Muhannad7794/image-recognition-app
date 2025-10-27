@@ -1,0 +1,45 @@
+{
+    "version": 1,
+    "type": "machine-learning",
+    "info": {
+        "name": "Model Training Block AUGMENT",
+        "description": "Transfer learning AUG model based on MobileNetV2 to classify images of home office objects based on a Kaggle dataset.",
+        "operatesOn": "image",
+        "imageInputScaling": "0..1",
+        "indRequiresGpu": true,
+        "repositoryUrl": "https://github.com/Muhannad7794/image-recognition-app"
+    },
+    "neuralNetwork": {
+        "image": {
+            "input": [
+                "width",
+                "height",
+                "channels"
+            ],
+            "output": [
+                "classes"
+            ]
+        }
+    },
+    "training": {
+        "arguments": [
+            {
+                "name": "epochs",
+                "type": "int",
+                "label": "Number of epochs",
+                "defaultValue": 20,
+                "minimum": 1,
+                "category": "training"
+            },
+            {
+                "name": "learning_rate",
+                "type": "float",
+                "label": "Learning rate",
+                "defaultValue": 0.0005,
+                "minimum": 0.00001,
+                "maximum": 0.1,
+                "category": "training"
+            }
+        ]
+    }
+}
