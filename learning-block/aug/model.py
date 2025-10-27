@@ -3,6 +3,9 @@ import math
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
+import os
+import json
+import sys
 
 
 # ---------- Schedules ----------
@@ -260,3 +263,78 @@ def compile_and_train(
     hist_parts.append(finetune_hist.history)
 
     return model, hist_parts
+
+
+# ---------- Saving utilities (SavedModel, TFLite, history) ----------
+
+
+def merge_histories(history_parts):
+    """
+    history_parts: list of dicts like [{'loss': [...], 'acc': [...]}, {...}, ...]
+    returns a single dict with lists concatenated per key.
+    """
+    merged = {}
+    for h in history_parts:
+        for k, v in h.items():
+            merged.setdefault(k, [])
+            merged[k].extend(list(v))
+    return merged
+
+
+def save_model_artifacts(model, history_parts, out_directory):
+    """
+    Saves:
+      - SavedModel -> <out_directory>/saved_model/
+      - TFLite (float32) -> <out_directory>/model.tflite
+      - training_history.json -> <out_directory>/training_history.json
+    """
+    if not out_directory:
+        print("[AUG][WARN] No out_directory provided; skipping saves.")
+        return
+
+    os.makedirs(out_directory, exist_ok=True)
+    saved_model_dir = os.path.join(out_directory, "saved_model")
+    tflite_path = os.path.join(out_directory, "model.tflite")
+    hist_path = os.path.join(out_directory, "training_history.json")
+
+    # 1) SavedModel
+    print(f"[AUG][SAVE] Saving Keras SavedModel -> {saved_model_dir}")
+    try:
+        model.save(saved_model_dir)
+    except Exception as e:
+        print(f"[AUG][ERROR] Saving SavedModel failed: {e}")
+        # Don't exit; still attempt TFLite from in-memory model
+
+    # 2) TFLite (float32) with fallback path
+    print(f"[AUG][SAVE] Converting to TFLite (float32) -> {tflite_path}")
+    tflite_model = None
+    try:
+        conv = tf.lite.TFLiteConverter.from_keras_model(model)
+        conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+        tflite_model = conv.convert()
+    except Exception as e:
+        print(f"[AUG][WARN] TFLite conversion from Keras model failed: {e}")
+        print("[AUG][SAVE] Retrying TFLite conversion from SavedModel...")
+        try:
+            conv = tf.lite.TFLiteConverter.from_saved_model(saved_model_dir)
+            conv.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+            tflite_model = conv.convert()
+        except Exception as e2:
+            print(f"[AUG][ERROR] TFLite conversion from SavedModel failed: {e2}")
+
+    if tflite_model is not None:
+        try:
+            with open(tflite_path, "wb") as f:
+                f.write(tflite_model)
+            print("[AUG][SAVE] TFLite model written.")
+        except Exception as e:
+            print(f"[AUG][ERROR] Writing TFLite file failed: {e}")
+
+    # 3) Training history (merged)
+    try:
+        merged_hist = merge_histories(history_parts or [])
+        with open(hist_path, "w") as f:
+            json.dump(merged_hist, f, default=lambda o: float(o))
+        print(f"[AUG][SAVE] Training history written -> {hist_path}")
+    except Exception as e:
+        print(f"[AUG][ERROR] Writing training history failed: {e}")
