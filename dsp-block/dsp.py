@@ -28,15 +28,14 @@ def _as_int(name: str, value: Any, lo: int = 1, hi: int = 8192) -> int:
 def _infer_channels(axes: List[str] | None, raw_len: int) -> int:
     if axes:
         a = [str(x).lower() for x in axes]
-        if {"r", "g", "b"}.issubset(set(a)):
+        if {"r", "g", "b"}.issubset(set(a)):  # explicit RGB
             return 3
         if any(x in {"px", "gray", "grey", "grayscale"} for x in a) and len(a) == 1:
             return 1
         if len(a) in (1, 3):
             return len(a)
-    if raw_len % 3 == 0:
-        return 3
-    return 1
+    # heuristic: prefer 3 if it divides, else 1
+    return 3 if (raw_len % 3 == 0) else 1
 
 
 def _best_wh_from_pixels(pixels: int) -> Tuple[int, int]:
@@ -57,8 +56,7 @@ def _best_wh_from_pixels(pixels: int) -> Tuple[int, int]:
         aspect_err = min(abs(ratio - t) for t in targets)
         return aspect_err + 1e-6 * (1 / h)
 
-    best = min(pairs, key=score)
-    return best
+    return min(pairs, key=score)
 
 
 def _ensure_float01(arr: np.ndarray) -> np.ndarray:
@@ -84,12 +82,11 @@ def generate_features(
     **kwargs,
 ) -> Dict[str, Any]:
 
-    # ---- Read target size from parameters.json ----
+    # ---- Target output size ----
     Wt = _as_int("img_width", kwargs.get("img-width", 96))
     Ht = _as_int("img_height", kwargs.get("img-height", 96))
 
-    # ---- Force model-compatible output channels (default 3 for RGB CNNs) ----
-    # Set "out_channels" in parameters.json / UI if you want 1 instead
+    # ---- Desired OUTPUT channels (guaranteed by this block) ----
     Cout_raw = kwargs.get("out_channels", 3)
     try:
         Cout = int(Cout_raw)
@@ -97,31 +94,27 @@ def generate_features(
         Cout = 3
     Cout = 3 if Cout == 3 else 1  # sanitize to {1,3}
 
-    # ---- Flatten & basic info ----
+    # ---- Flatten incoming buffer ----
     raw = np.asarray(raw_data)
     flat = raw.reshape(-1) if raw.ndim > 1 else raw
+    N = int(flat.size)
 
-    # ---- Determine input channels (prefer explicit) ----
-    Cin = (
-        kwargs.get("channels")
-        or kwargs.get("input_channels")
-        or _infer_channels(axes, flat.size)
-    )
-    if Cin not in (1, 3):
-        Cin = 3 if flat.size % 3 == 0 else 1
+    # ---- Determine INPUT channels robustly ----
+    Cin_pref = kwargs.get("channels") or kwargs.get("input_channels")
+    if Cin_pref in (1, 3):
+        Cin_pref = int(Cin_pref)
+        Cin = Cin_pref if (N % Cin_pref == 0) else (3 if (N % 3 == 0) else 1)
+    else:
+        Cin = _infer_channels(axes, N)
+        if N % Cin != 0:
+            Cin = 3 if (N % 3 == 0) else 1
 
-    # ---- Determine input W,H (prefer explicit) ----
+    # ---- Determine INPUT W,H ----
     Win = kwargs.get("width") or kwargs.get("input_width")
     Hin = kwargs.get("height") or kwargs.get("input_height")
-
     if Win is None or Hin is None:
-        if flat.size % Cin != 0:
-            raise ValueError(
-                f"Incoming data length {flat.size} not divisible by channels={Cin}"
-            )
-        pixels = flat.size // Cin
+        pixels = N // Cin  # integer division is safe after Cin fix
         Hin, Win = _best_wh_from_pixels(pixels)
-
     Win = _as_int("input_width", Win)
     Hin = _as_int("input_height", Hin)
 
@@ -133,29 +126,35 @@ def generate_features(
             f"Could not reshape raw data to (H={Hin}, W={Win}, C={Cin}): {e}"
         )
 
-    # ---- Resize (OpenCV expects (width, height)) ----
+    # ---- Resize to target ----
     resized = cv2.resize(img, (Wt, Ht), interpolation=cv2.INTER_AREA)
-    if Cin == 1 and resized.ndim == 2:
-        resized = resized[..., None]  # (H, W, 1)
+    if resized.ndim == 2:
+        resized = resized[..., None]  # keep channel axis
 
-    # ---- Convert channels to match model contract (Cout) ----
+    # ---- Convert channels to match OUTPUT contract (Cout) ----
     if resized.shape[2] == 1 and Cout == 3:
-        # Grayscale -> RGB by replication
+        # gray -> RGB (replicate)
         resized = np.repeat(resized, 3, axis=2)
     elif resized.shape[2] == 3 and Cout == 1:
-        # RGB -> Grayscale (luma)
-        y = (
-            0.299 * resized[..., 0] + 0.587 * resized[..., 1] + 0.114 * resized[..., 2]
-        ).astype(np.float32)
-        resized = y[..., None]
+        # RGB -> gray (luma)
+        y = 0.299 * resized[..., 0] + 0.587 * resized[..., 1] + 0.114 * resized[..., 2]
+        resized = y.astype(np.float32)[..., None]
 
     # ---- Scale to [0,1] ----
     resized = _ensure_float01(resized)
 
-    # ---- Flatten to 1D Python list for EI ----
+    # ---- Flatten to 1D list (EI expects length = W*H*C) ----
     features = resized.astype(np.float32).reshape(-1).tolist()
 
-    # ----- Build output config -----
+    # ---- Final sanity: length must match product ----
+    expected = Wt * Ht * Cout
+    if len(features) != expected:
+        raise ValueError(
+            f"Feature length mismatch: got {len(features)} but expected {expected} "
+            f"(width={Wt}, height={Ht}, channels={Cout})."
+        )
+
+    # ---- Output config ----
     output_config = {
         "type": "image",
         "shape": {"width": Wt, "height": Ht, "channels": Cout},
