@@ -237,5 +237,5 @@ except Exception as e:
 # Save history
 hist_path = os.path.join(out_dir, "training_history.json")
 with open(hist_path, "w") as f:
-    json.dump(history.history, f)
+    json.dump(history.history, f, default=lambda o: float(o))
 print("[AUG] Model and history saved.")
