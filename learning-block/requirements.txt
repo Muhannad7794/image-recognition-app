@@ -1,6 +1,4 @@
 # Full TensorFlow for model training
-tensorflow
-numpy
 pandas
 pillow
 opencv-python-headless
