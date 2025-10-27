@@ -1,0 +1,119 @@
+{
+    "version": 1,
+    "type": "machine-learning",
+    "info": {
+        "name": "Model Training Block — Finetune (MobileNetV2 @96×96)",
+        "description": "Warmup (frozen) → full finetune with cosine LR, label smoothing, class weights, and moderate data augmentation.",
+        "operatesOn": "image",
+        "imageInputScaling": "0..1",
+        "indRequiresGpu": true,
+        "repositoryUrl": "https://github.com/Muhannad7794/image-recognition-app"
+    },
+    "neuralNetwork": {
+        "image": {
+            "input": [
+                "width",
+                "height",
+                "channels"
+            ],
+            "output": [
+                "classes"
+            ]
+        }
+    },
+    "training": {
+        "arguments": [
+            {
+                "name": "epochs",
+                "type": "int",
+                "label": "Total epochs (warmup + finetune)",
+                "defaultValue": 50,
+                "minimum": 5,
+                "category": "training"
+            },
+            {
+                "name": "learning_rate",
+                "type": "float",
+                "label": "Warmup learning rate (frozen backbone)",
+                "defaultValue": 0.001,
+                "minimum": 0.00001,
+                "maximum": 0.1,
+                "category": "training"
+            },
+            {
+                "name": "warmup_epochs",
+                "type": "int",
+                "label": "Warmup epochs (backbone frozen)",
+                "defaultValue": 8,
+                "minimum": 0,
+                "maximum": 30,
+                "category": "training"
+            },
+            {
+                "name": "fine_tune_start_lr",
+                "type": "float",
+                "label": "Finetune start LR (cosine decay)",
+                "defaultValue": 0.0001,
+                "minimum": 0.000001,
+                "maximum": 0.01,
+                "category": "training"
+            },
+            {
+                "name": "fine_tune_fraction",
+                "type": "float",
+                "label": "Unfreeze fraction of backbone (0–1, 1=all)",
+                "defaultValue": 1.0,
+                "minimum": 0.1,
+                "maximum": 1.0,
+                "category": "training"
+            },
+            {
+                "name": "batch_size",
+                "type": "int",
+                "label": "Batch size",
+                "defaultValue": 64,
+                "minimum": 8,
+                "maximum": 256,
+                "category": "resources"
+            },
+            {
+                "name": "label_smoothing",
+                "type": "float",
+                "label": "Label smoothing",
+                "defaultValue": 0.1,
+                "minimum": 0.0,
+                "maximum": 0.3,
+                "category": "regularization"
+            },
+            {
+                "name": "use_class_weights",
+                "type": "bool",
+                "label": "Use balanced class weights",
+                "defaultValue": true,
+                "category": "regularization"
+            },
+            {
+                "name": "early_stopping_patience",
+                "type": "int",
+                "label": "Early stopping patience (val_loss)",
+                "defaultValue": 10,
+                "minimum": 3,
+                "maximum": 20,
+                "category": "regularization"
+            },
+            {
+                "name": "augment_strength",
+                "type": "choice",
+                "label": "Augmentation strength",
+                "defaultValue": "medium",
+                "options": [
+                    "off",
+                    "light",
+                    "medium",
+                    "strong"
+                ],
+                "category": "augmentation"
+            }
+        ]
+    }
+}
