@@ -1,191 +1,167 @@
-# learning-block/aug/model.py
-import tensorflow as tf
-from tensorflow.keras.applications import MobileNetV2
-from tensorflow.keras.layers import (
-    Dense,
-    GlobalAveragePooling2D,
-    Dropout,
-    Rescaling,
-    Input,
-)
-from tensorflow.keras.models import Model
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+import os, json
 import numpy as np
-import os, json, argparse, sys
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
 
-# --- Args ---
-parser = argparse.ArgumentParser(
-    description="Train image classification model (AUGMENT w/ robust loading)"
-)
-parser.add_argument("--data-directory", type=str, required=True)
-parser.add_argument("--epochs", type=int, required=True)
-parser.add_argument("--learning-rate", type=float, required=True)
-parser.add_argument("--out-directory", type=str, required=True)
-args, _ = parser.parse_known_args()
+# ---------- Inputs ----------
+INPUT_SHAPE = (96, 96, 3)  # (H, W, C)
+NUM_CLASSES = 47
+WARMUP_EPOCHS = 8
+TOTAL_EPOCHS = 50
+HEAD_LR = 1e-3
+FT_LR = 1e-4
+LABEL_SMOOTH = 0.1
+MIXUP_ALPHA = 0.2
+BATCH_SIZE = 64
 
-IMG_HEIGHT = 96
-IMG_WIDTH = 96
-CHANNELS = 3
-INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
+# ---------- Load data ----------
+x_train = np.load("X_split_train.npy").astype("float32")
+y_train_oh = np.load("Y_split_train.npy").astype("float32")  # one-hot (n,47)
+x_val = np.load("X_split_test.npy").astype("float32")
+y_val_oh = np.load("Y_split_test.npy").astype("float32")
 
-print(f"[AUG] Loading from: {args.data_directory}")
-
-
-# --- Resolve file paths (prefer split-aware pairs for BOTH train & val) ---
-def _pick(root: str, names: list[str]) -> str:
-    for n in names:
-        p = os.path.join(root, n)
-        if os.path.exists(p):
-            return p
-    raise FileNotFoundError(f"None of {names} found under {root}")
+# If stored as one-hot but model expects class ids:
+y_train = np.argmax(y_train_oh, axis=1)
+y_val = np.argmax(y_val_oh, axis=1)
 
 
-x_train_path = _pick(args.data_directory, ["X_split_train.npy", "X_train_features.npy"])
-y_train_path = _pick(args.data_directory, ["Y_split_train.npy", "y_train.npy"])
-x_val_path = _pick(args.data_directory, ["X_split_test.npy", "X_validate_features.npy"])
-y_val_path = _pick(args.data_directory, ["Y_split_test.npy", "y_validate.npy"])
-
-print("[AUG] Directory listing:", sorted(os.listdir(args.data_directory)))
-print(f"[AUG] Train X: {os.path.basename(x_train_path)}")
-print(f"[AUG] Train y: {os.path.basename(y_train_path)}")
-print(f"[AUG] Val   X: {os.path.basename(x_val_path)}")
-print(f"[AUG] Val   y: {os.path.basename(y_val_path)}")
-
-# --- Load ---
-x_train = np.load(x_train_path)
-y_train = np.load(y_train_path)
-x_val = np.load(x_val_path)
-y_val = np.load(y_val_path)
-
-print(f"[AUG] x_train (raw): {x_train.shape}, x_val (raw): {x_val.shape}")
-print(f"[AUG] y_train (raw): {y_train.shape}, y_val (raw): {y_val.shape}")
-
-# --- Ensure NHWC (N, 96, 96, 3) and float32 ---
-expected_feat_len = IMG_HEIGHT * IMG_WIDTH * CHANNELS
+# Resize to 96 if needed (keeps pipeline simple)
+def _resize(imgs):
+    return tf.image.resize(imgs, INPUT_SHAPE[:2]).numpy()
 
 
-def _to_nhwc(x: np.ndarray, name: str) -> np.ndarray:
-    if x.ndim == 2:
-        if x.shape[1] != expected_feat_len:
-            raise ValueError(
-                f"[AUG][FATAL] {name} feature len {x.shape[1]} != {expected_feat_len}"
-            )
-        x = x.reshape((-1, IMG_HEIGHT, IMG_WIDTH, CHANNELS))
-    if x.ndim != 4 or x.shape[1:] != (IMG_HEIGHT, IMG_WIDTH, CHANNELS):
-        raise ValueError(
-            f"[AUG][FATAL] Bad tensor shape for {name}: {x.shape}, expected (N,{IMG_HEIGHT},{IMG_WIDTH},{CHANNELS})"
+if x_train.shape[1:3] != INPUT_SHAPE[:2]:
+    x_train = _resize(x_train)
+    x_val = _resize(x_val)
+
+
+# ---------- Datasets with MixUp ----------
+def mixup(ds, alpha=MIXUP_ALPHA, num_classes=NUM_CLASSES):
+    if alpha <= 0:
+        return ds
+
+    def _sample_beta(shape):
+        gamma1 = tf.random.gamma(shape, alpha, 1.0)
+        gamma2 = tf.random.gamma(shape, alpha, 1.0)
+        return gamma1 / (gamma1 + gamma2)
+
+    def _mix(a, b):
+        (x1, y1), (x2, y2) = a, b
+        lam = _sample_beta((tf.shape(x1)[0], 1, 1, 1))
+        lam_y = tf.reshape(lam, (-1, 1))
+        x = x1 * lam + x2 * (1.0 - lam)
+        y = tf.one_hot(y1, num_classes) * lam_y + tf.one_hot(y2, num_classes) * (
+            1.0 - lam_y
         )
-    return x.astype(np.float32, copy=False)
+        return x, y
+
+    ds2 = ds.shuffle(1024, reshuffle_each_iteration=True)
+    return tf.data.Dataset.zip((ds, ds2)).map(_mix, num_parallel_calls=tf.data.AUTOTUNE)
 
 
-x_train = _to_nhwc(x_train, "x_train")
-x_val = _to_nhwc(x_val, "x_val")
-
-# --- Labels: enforce identical label spaces BEFORE converting to sparse ---
-if y_train.ndim == 2 and y_val.ndim == 2:
-    # One-hot width must match exactly across splits
-    if y_train.shape[1] != y_val.shape[1]:
-        raise ValueError(
-            f"[AUG][FATAL] Label-space mismatch: train one-hot width={y_train.shape[1]} "
-            f"vs val width={y_val.shape[1]}. Recalculate features for ALL data."
-        )
-    NUM_CLASSES = int(y_train.shape[1])
-    y_train = y_train.argmax(axis=1)
-    y_val = y_val.argmax(axis=1)
-
-elif y_train.ndim == 1 and y_val.ndim == 1:
-    # Sparse labels: compute NUM_CLASSES and validate ranges
-    NUM_CLASSES = int(max(y_train.max(), y_val.max()) + 1)
-else:
-    raise ValueError(
-        f"[AUG][FATAL] Inconsistent label dims: train={y_train.ndim}D, val={y_val.ndim}D"
-    )
-
-# Optional: handle joint 1-indexed labels
-if y_train.min() == 1 and y_val.min() == 1:
-    print("[AUG] Shifting labels from 1-indexed to 0-indexed.")
-    y_train = y_train - 1
-    y_val = y_val - 1
-
-# Sanity on label ranges
-if (y_train.min() < 0) or (y_val.min() < 0):
-    raise ValueError("[AUG][FATAL] Negative class index found after preprocessing.")
-if (y_train.max() >= NUM_CLASSES) or (y_val.max() >= NUM_CLASSES):
-    raise ValueError(
-        f"[AUG][FATAL] Class index out of range: max(train)={y_train.max()}, "
-        f"max(val)={y_val.max()}, NUM_CLASSES={NUM_CLASSES}"
-    )
-
-
-# Quick histograms (useful diagnostics)
-def _hist(lbls: np.ndarray, name: str):
-    h = np.bincount(lbls.astype(int), minlength=NUM_CLASSES)
-    print(f"[AUG] Class histogram {name} (n={len(lbls)}): {h}")
-
-
-_hist(y_train, "train")
-_hist(y_val, "val")
-
-print(f"[AUG] Final INPUT_SHAPE={INPUT_SHAPE}, NUM_CLASSES={NUM_CLASSES}")
-print(f"[AUG] x_train: {x_train.shape}, x_val: {x_val.shape}")
-print(f"[AUG] y_train: {y_train.shape}, y_val: {y_val.shape}")
-
-# --- Model ---
-inp = Input(shape=INPUT_SHAPE, name="image_input")
-augment = tf.keras.Sequential(
+augment = keras.Sequential(
     [
-        tf.keras.layers.RandomFlip("horizontal"),
-        tf.keras.layers.RandomRotation(0.05),
-        tf.keras.layers.RandomZoom(0.10),
-        tf.keras.layers.RandomContrast(0.10),
+        layers.RandomFlip("horizontal"),
+        layers.RandomRotation(0.1),
+        layers.RandomZoom(0.15),
+        layers.RandomTranslation(0.1, 0.1),
+        layers.RandomContrast(0.2),
     ],
     name="augment",
 )
 
-x = augment(inp)  # only active in training
-x = Rescaling(2.0, offset=-1.0, name="to_minus1_plus1")(x)
 
-weights_path = os.path.expanduser(
-    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5"
+def make_ds(x, y, training=True):
+    ds = tf.data.Dataset.from_tensor_slices((x, y))
+    if training:
+        ds = ds.shuffle(2048, reshuffle_each_iteration=True)
+        ds = ds.map(lambda xi, yi: (xi, yi), num_parallel_calls=tf.data.AUTOTUNE)
+    ds = ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+    if training and MIXUP_ALPHA > 0:
+        ds = mixup(ds, MIXUP_ALPHA)
+    return ds
+
+
+train_ds = make_ds(x_train, y_train, training=True)
+val_ds = make_ds(x_val, y_val, training=False)
+
+# ---------- Model ----------
+inputs = layers.Input(shape=INPUT_SHAPE, name="image_input")
+x = augment(inputs)
+x = layers.Rescaling(scale=1 / 127.5, offset=-1)(x)  # [-1, 1]
+base = keras.applications.MobileNetV2(
+    input_shape=INPUT_SHAPE, include_top=False, weights="imagenet", alpha=1.0
 )
-base_model = MobileNetV2(
-    input_shape=INPUT_SHAPE, include_top=False, weights=weights_path
-)
-base_model.trainable = False
+base.trainable = False  # warmup: freeze
 
-x = base_model(x, training=False)
-x = GlobalAveragePooling2D(name="gap")(x)
-x = Dropout(0.5, name="dropout")(x)
-preds = Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
-model = Model(inputs=inp, outputs=preds)
+x = base(x, training=False)
+x = layers.GlobalAveragePooling2D(name="gap")(x)
+x = layers.Dropout(0.2)(x)
+outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
+model = keras.Model(inputs, outputs)
 
-# --- Compile ---
-loss = tf.keras.losses.SparseCategoricalCrossentropy()
-opt = Adam(learning_rate=args.learning_rate)
-model.compile(optimizer=opt, loss=loss, metrics=["accuracy"])
-model.summary()
 
-# --- Callbacks ---
+# ---------- Loss, metrics, schedule ----------
+def top5(y_true, y_pred):  # y_true as class ids
+    return tf.keras.metrics.top_k_categorical_accuracy(
+        tf.one_hot(tf.cast(y_true, tf.int32), NUM_CLASSES), y_pred, k=5
+    )
+
+
+loss = keras.losses.CategoricalCrossentropy(label_smoothing=LABEL_SMOOTH)
+metrics = [
+    keras.metrics.SparseCategoricalAccuracy(name="acc"),
+    keras.metrics.SparseTopKCategoricalAccuracy(k=5, name="top5"),
+]
+
+# class weights (balanced)
+class_counts = np.bincount(y_train, minlength=NUM_CLASSES)
+inv_freq = class_counts.max() / np.maximum(class_counts, 1)
+class_weight = {i: float(inv_freq[i]) for i in range(NUM_CLASSES)}
+
+# Warmup compile
+model.compile(optimizer=keras.optimizers.Adam(HEAD_LR), loss=loss, metrics=metrics)
+
 cbs = [
-    EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True, verbose=1),
-    ReduceLROnPlateau(
-        monitor="val_loss", factor=0.5, patience=2, min_lr=1e-6, verbose=1
+    keras.callbacks.EarlyStopping(
+        monitor="val_loss", patience=10, restore_best_weights=True
     ),
 ]
 
-# --- Train ---
-print(f"[AUG] Training for {args.epochs} epochs, lr={args.learning_rate} ...")
-history = model.fit(
-    x_train,
-    y_train,
-    validation_data=(x_val, y_val),
-    epochs=args.epochs,
-    batch_size=32,
-    verbose=2,
+# ---------- Phase 1: warmup ----------
+model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=WARMUP_EPOCHS,
+    class_weight=class_weight,
     callbacks=cbs,
+    verbose=2,
 )
-print("[AUG] Training finished.")
+
+# ---------- Phase 2: fine-tune ----------
+# Unfreeze top ~40% of layers
+for layer in base.layers[int(len(base.layers) * 0.6) :]:
+    layer.trainable = True
+
+# Cosine decay schedule for fine-tuning
+steps_per_epoch = int(np.ceil(len(x_train) / BATCH_SIZE))
+decay = keras.optimizers.schedules.CosineDecay(
+    initial_learning_rate=FT_LR,
+    decay_steps=steps_per_epoch * (TOTAL_EPOCHS - WARMUP_EPOCHS),
+)
+model.compile(optimizer=keras.optimizers.Adam(decay), loss=loss, metrics=metrics)
+
+model.fit(
+    train_ds,
+    validation_data=val_ds,
+    initial_epoch=model.history.epoch[-1] + 1,
+    epochs=TOTAL_EPOCHS,
+    class_weight=class_weight,
+    callbacks=cbs,
+    verbose=2,
+)
+
 
 # --- Save (SavedModel + TFLite) ---
 out_dir = args.out_directory
