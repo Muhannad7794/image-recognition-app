@@ -1,34 +1,38 @@
-# 1. Start from the STABLE TensorFlow GPU image
+# 1) Base image with TF 2.15
 FROM tensorflow/tensorflow:2.15.0-gpu
 
-# Make Keras cache path explicit and keep logs quiet
+# 2) Env
 ENV KERAS_HOME=/root/.keras \
     TF_CPP_MIN_LOG_LEVEL=2 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Set the working directory 
+# 3) Workdir
 WORKDIR /learning-block-dockerized
 
-# Copy the requirements file in first to leverage Docker caching
-COPY requirements.txt .
-
-# Install the Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Ensure we have wget and proper CA certs for HTTPS
+# 4) System deps for wget over HTTPS
 RUN apt-get update && \
     apt-get install -y --no-install-recommends wget ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# --- PRE-DOWNLOAD WEIGHTS ---
-# Create the directory Keras expects and fetch the exact 96x96 no-top weights
+# 5) PRE-DOWNLOAD Keras weights (96x96 no-top)
 RUN mkdir -p $KERAS_HOME/models && \
     wget -q https://storage.googleapis.com/tensorflow/keras-applications/mobilenet_v2/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5 \
       -O $KERAS_HOME/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5
-# --- END PRE-DOWNLOAD ---
 
-# Copy the rest of your model's source code
+# 6) Copy requirements first (for caching)
+COPY requirements.txt .
+
+# 7) Install TF-compatible numeric stack FIRST (prevents numpy 2.x upgrades)
+#    TensorFlow 2.15 is compatible with numpy 1.26.x and ml-dtypes <0.5
+RUN pip install --no-cache-dir "numpy==1.26.4" "ml-dtypes==0.3.2"
+
+# 8) Now install the rest, but DO NOT let it upgrade numpy/ml-dtypes
+#    If your requirements include those pins, this is still safe.
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 9) Copy the rest of your code
 COPY . .
 
-# Run the model (Edge Impulse will append args to this entrypoint)
+# 10) Run training entrypoint (EI adds args)
 ENTRYPOINT ["python3", "model.py"]

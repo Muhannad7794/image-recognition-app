@@ -17,6 +17,10 @@ import argparse
 import sys
 import traceback
 
+# debug to check versions
+print("NumPy:", np.__version__)
+print("TF:", tf.__version__)
+
 # --- Script Arguments ---
 parser = argparse.ArgumentParser(description="Train image classification model")
 parser.add_argument("--data-directory", type=str, required=True)
@@ -151,8 +155,12 @@ inp = Input(shape=INPUT_SHAPE, name="image_input")
 scaled = Rescaling(scale=2.0, offset=-1.0, name="to_minus1_plus1")(inp)
 
 # Base model (imagenet weights expect 3-channel RGB and [-1,1] range)
-weights_path = os.path.expanduser("~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5")
-base_model = MobileNetV2(input_shape=INPUT_SHAPE, include_top=False, weights=weights_path)
+weights_path = os.path.expanduser(
+    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5"
+)
+base_model = MobileNetV2(
+    input_shape=INPUT_SHAPE, include_top=False, weights=weights_path
+)
 base_model.trainable = False
 
 x = base_model(scaled, training=False)

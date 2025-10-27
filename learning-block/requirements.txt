@@ -1,4 +1,5 @@
-# Full TensorFlow for model training
-pandas
+numpy==1.26.4
+ml-dtypes==0.3.2
 pillow
 opencv-python-headless
+
