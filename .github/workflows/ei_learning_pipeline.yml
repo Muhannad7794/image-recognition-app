@@ -26,7 +26,7 @@ jobs:
         run: npm install -g edge-impulse-cli
 
       - name: Push Custom Learning Block
-        working-directory: ./learning-blocks/${{ matrix.variant }}
+        working-directory: ./learning-block/${{ matrix.variant }}
         env:
           EDGE_IMPULSE_API_KEY: ${{ secrets.EI_API_KEY }}
         run: |
