@@ -22,7 +22,7 @@ INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
 WARMUP_EPOCHS = 8
 LABEL_SMOOTH = 0.10
 BATCH_SIZE = 64
-FINE_TUNE_FRACTION = 0.40  # unfreeze top 40% of backbone
+FINE_TUNE_FRACTION = 0.40  # unfreeze the top 40% of backbone
 FT_BASE_LR = 1e-4  # starting LR for cosine during finetune
 
 print(f"[AUG] Data dir: {args.data_directory}")
