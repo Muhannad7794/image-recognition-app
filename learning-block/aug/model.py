@@ -357,7 +357,7 @@ if __name__ == "__main__":
 
     # Determine NUM_CLASSES safely and fix labels if they are one-hot
     if y_train.ndim == 2 and y_val.ndim == 2:
-        if y_train.shape[1] != y_val.shape[1]]:
+        if y_train.shape[1] != y_val.shape[1]:
             raise ValueError(
                 f"Label-space mismatch: train one-hot width={y_train.shape[1]} vs val width={y_val.shape[1]}"
             )
