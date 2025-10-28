@@ -25,16 +25,16 @@ parser.add_argument("--learning-rate", type=float, required=True)
 parser.add_argument("--out-directory", type=str, required=True)
 args, unknown = parser.parse_known_args()
 
-# --- Define image shape (must match DSP out_channels/size) ---
+# --- Define image shape ---
 IMG_HEIGHT = 96
 IMG_WIDTH = 96
-CHANNELS = 3  # <- keep in sync with parameters.json: out_channels = 3
+CHANNELS = 3 
 INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
 
-# --- Load Data using NumPy (robust & symmetric) ---
+# --- Load Data ---
 print(f"Loading data from directory: {args.data_directory}")
 
-# Prefer split-aware files for BOTH train and val
+# Define split-aware file paths for both train and val
 paths = {
     "x_train": ["X_split_train.npy", "X_train_features.npy"],
     "y_train": ["Y_split_train.npy", "y_train.npy"],

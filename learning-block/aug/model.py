@@ -1,14 +1,34 @@
-# model.py (AUG) — MobileNetV2 (96x96), balanced training, conservative aug
+# learning-block/aug/model.py
 import math
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras import layers
 import os
 import json
 import sys
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+import argparse
+import numpy as np
 
+parser = argparse.ArgumentParser(description="Train AUG MobileNetV2 (96x96)")
+parser.add_argument("--data-directory", type=str, required=True)
+parser.add_argument("--out-directory", type=str, required=True)
+# sensible defaults but overridable:
+parser.add_argument("--epochs", type=int, default=30)
+parser.add_argument("--batch-size", type=int, default=64)
+parser.add_argument("--learning-rate", type=float, default=1e-4)
+parser.add_argument("--warmup-epochs", type=int, default=6)
+parser.add_argument("--unfreeze-pct", type=float, default=0.7)
+parser.add_argument("--weight-decay", type=float, default=1e-4)
+parser.add_argument("--label-smoothing", type=float, default=0.1)
+parser.add_argument("--mixup-alpha", type=float, default=0.2)
+parser.add_argument("--cutmix-alpha", type=float, default=0.2)
+args, _ = parser.parse_known_args()
 
-# ---------- Schedules ----------
+# --- Define image shape ---
+IMG_H, IMG_W, C = 96, 96, 3
+EXPECTED_FEAT_LEN = IMG_H * IMG_W * C
+
+# ---------------- Schedules ----------------
 class WarmupCosine(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, base_lr, warmup_epochs, steps_per_epoch, total_epochs):
         super().__init__()
@@ -29,7 +49,7 @@ class WarmupCosine(tf.keras.optimizers.schedules.LearningRateSchedule):
         return tf.where(step < self.warmup_steps, lr_warm, lr_cos)
 
 
-# ---------- Optional MixUp/CutMix ----------
+# ---------------- MixUp/CutMix ----------------
 def _sample_beta(alpha, shape):
     if alpha <= 0.0:
         return tf.ones(shape)
@@ -69,57 +89,30 @@ def apply_cutmix(images, labels, alpha):
     y2 = tf.clip_by_value(ry + rh // 2, 0, h)
 
     index = tf.random.shuffle(tf.range(bs))
-    images2 = tf.gather(images, index)
-    labels2 = tf.gather(labels, index)
 
-    def cut_one(img, img2, xi1, yi1, xi2, yi2):
-        mask = tf.ones((yi2 - yi1, xi2 - xi1, tf.shape(img)[-1]), img.dtype)
-        pad_top = yi1
-        pad_left = xi1
-        pad_bottom = tf.shape(img)[0] - yi2
-        pad_right = tf.shape(img)[1] - xi2
-        patch = tf.pad(mask, [[pad_top, pad_bottom], [pad_left, pad_right], [0, 0]])
-        return img * (1 - patch) + img2 * patch
-
-    out_imgs = []
-    new_lams = []
-    for i in range(
-        bs.numpy() if isinstance(bs, tf.Tensor) and not tf.executing_eagerly() else 0
-    ):
-        pass  # (Graph mode safe implementation below)
-
-    # Vectorized cutmix (graph friendly)
-    batch_indices = tf.range(bs)
-    x1e = tf.expand_dims(x1, 1)
-    y1e = tf.expand_dims(y1, 1)
-    x2e = tf.expand_dims(x2, 1)
-    y2e = tf.expand_dims(y2, 1)
-    # Build binary masks
+    # Vectorized cutmix (graph friendly): build binary box mask per sample
     xr = tf.range(w)
     yr = tf.range(h)
     X, Y = tf.meshgrid(xr, yr)
     X = tf.expand_dims(tf.expand_dims(X, 0), -1)  # [1,H,W,1]
     Y = tf.expand_dims(tf.expand_dims(Y, 0), -1)
-    in_x = (X >= tf.cast(x1e[:, None, None, :], X.dtype)) & (
-        X < tf.cast(x2e[:, None, None, :], X.dtype)
+    in_x = (X >= tf.cast(tf.expand_dims(x1, 1)[:, None, None, :], X.dtype)) & (
+        X < tf.cast(tf.expand_dims(x2, 1)[:, None, None, :], X.dtype)
     )
-    in_y = (Y >= tf.cast(y1e[:, None, None, :], Y.dtype)) & (
-        Y < tf.cast(y2e[:, None, None, :], Y.dtype)
+    in_y = (Y >= tf.cast(tf.expand_dims(y1, 1)[:, None, None, :], Y.dtype)) & (
+        Y < tf.cast(tf.expand_dims(y2, 1)[:, None, None, :], Y.dtype)
     )
     box = tf.cast(in_x & in_y, images.dtype)  # [B,H,W,1]
 
     mixed = images * (1 - box) + tf.gather(images, index) * box
     box_area = tf.reduce_mean(box, axis=[1, 2, 3])  # fraction replaced
-    lam_eff = 1.0 - box_area
-    lam_eff = tf.reshape(lam_eff, (-1, 1))
+    lam_eff = tf.reshape(1.0 - box_area, (-1, 1))
     mixed_y = lam_eff * labels + (1 - lam_eff) * tf.gather(labels, index)
     return mixed, mixed_y
 
 
-# ---------- Model ----------
-def build_model(
-    input_shape, num_classes, unfreeze_pct=0.7, weight_decay=1e-4, dropout=0.3
-):
+# ---------------- Model ----------------
+def build_model(input_shape, num_classes, unfreeze_pct=0.7, weight_decay=1e-4, dropout=0.3):
     inputs = keras.Input(shape=input_shape)
 
     # 0..1 -> [-1,1] for MobileNetV2
@@ -144,32 +137,26 @@ def build_model(
     x = base(x, training=False)
     x = layers.GlobalAveragePooling2D()(x)
     x = layers.BatchNormalization()(x)
-    x = layers.Dense(
-        256, kernel_regularizer=keras.regularizers.l2(weight_decay), activation="relu"
-    )(x)
+    x = layers.Dense(256, kernel_regularizer=keras.regularizers.l2(weight_decay), activation="relu")(x)
     x = layers.Dropout(dropout)(x)
     logits = layers.Dense(
-        num_classes,
-        activation=None,
-        kernel_regularizer=keras.regularizers.l2(weight_decay),
+        num_classes, activation=None, kernel_regularizer=keras.regularizers.l2(weight_decay)
     )(x)
 
     model = keras.Model(inputs, logits, name="aug_mnetv2_96")
     return model, base
 
 
-def compile_and_train(
-    x_train, y_train, x_val, y_val, num_classes, args, class_weights=None
-):
-    bs = int(args.get("batch_size", 64))
-    epochs = int(args.get("epochs", 30))
-    base_lr = float(args.get("learning_rate", 1e-4))
-    warmup_epochs = int(args.get("warmup_epochs", 6))
-    unfreeze_pct = float(args.get("unfreeze_pct", 0.7))
-    weight_decay = float(args.get("weight_decay", 1e-4))
-    label_smoothing = float(args.get("label_smoothing", 0.1))
-    mixup_alpha = float(args.get("mixup_alpha", 0.2))
-    cutmix_alpha = float(args.get("cutmix_alpha", 0.2))
+def compile_and_train(x_train, y_train, x_val, y_val, num_classes, args_dict, class_weights=None):
+    bs = int(args_dict.get("batch_size", 64))
+    epochs = int(args_dict.get("epochs", 30))
+    base_lr = float(args_dict.get("learning_rate", 1e-4))
+    warmup_epochs = int(args_dict.get("warmup_epochs", 6))
+    unfreeze_pct = float(args_dict.get("unfreeze_pct", 0.7))
+    weight_decay = float(args_dict.get("weight_decay", 1e-4))
+    label_smoothing = float(args_dict.get("label_smoothing", 0.1))
+    mixup_alpha = float(args_dict.get("mixup_alpha", 0.2))
+    cutmix_alpha = float(args_dict.get("cutmix_alpha", 0.2))
 
     input_shape = x_train.shape[1:]
     model, base = build_model(input_shape, num_classes, unfreeze_pct, weight_decay)
@@ -177,22 +164,14 @@ def compile_and_train(
     steps_per_epoch = max(1, math.ceil(len(x_train) / bs))
     lr_schedule = WarmupCosine(base_lr, warmup_epochs, steps_per_epoch, epochs)
     try:
-        optimizer = tf.keras.optimizers.AdamW(
-            learning_rate=lr_schedule, weight_decay=weight_decay
-        )
+        optimizer = tf.keras.optimizers.AdamW(learning_rate=lr_schedule, weight_decay=weight_decay)
     except TypeError:
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr_schedule)
 
-    loss = tf.keras.losses.CategoricalCrossentropy(
-        from_logits=True, label_smoothing=label_smoothing
-    )
+    loss = tf.keras.losses.CategoricalCrossentropy(from_logits=True, label_smoothing=label_smoothing)
     top5 = tf.keras.metrics.TopKCategoricalAccuracy(k=5, name="top5")
 
-    model.compile(
-        optimizer=optimizer,
-        loss=loss,
-        metrics=[tf.keras.metrics.CategoricalAccuracy(name="acc"), top5],
-    )
+    model.compile(optimizer=optimizer, loss=loss, metrics=[tf.keras.metrics.CategoricalAccuracy(name="acc"), top5])
 
     # tf.data pipeline + optional MixUp/CutMix after warmup
     train_ds = (
@@ -201,11 +180,7 @@ def compile_and_train(
         .batch(bs)
         .prefetch(tf.data.AUTOTUNE)
     )
-    val_ds = (
-        tf.data.Dataset.from_tensor_slices((x_val, y_val))
-        .batch(bs)
-        .prefetch(tf.data.AUTOTUNE)
-    )
+    val_ds = tf.data.Dataset.from_tensor_slices((x_val, y_val)).batch(bs).prefetch(tf.data.AUTOTUNE)
 
     # Warmup phase with frozen base
     hist_parts = []
@@ -225,11 +200,7 @@ def compile_and_train(
         layer.trainable = i >= cutoff
 
     # Re-compile (BNs now trainable in unfrozen part)
-    model.compile(
-        optimizer=optimizer,
-        loss=loss,
-        metrics=[tf.keras.metrics.CategoricalAccuracy(name="acc"), top5],
-    )
+    model.compile(optimizer=optimizer, loss=loss, metrics=[tf.keras.metrics.CategoricalAccuracy(name="acc"), top5])
 
     # Fine-tune with optional MixUp/CutMix
     def augment_batch(images, labels):
@@ -265,14 +236,9 @@ def compile_and_train(
     return model, hist_parts
 
 
-# ---------- Saving utilities (SavedModel, TFLite, history) ----------
-
-
+# ---------------- Saving utilities (SavedModel, TFLite, history) ----------------
 def merge_histories(history_parts):
-    """
-    history_parts: list of dicts like [{'loss': [...], 'acc': [...]}, {...}, ...]
-    returns a single dict with lists concatenated per key.
-    """
+    """Merge list of history dicts into a single dict with concatenated lists."""
     merged = {}
     for h in history_parts:
         for k, v in h.items():
@@ -285,7 +251,7 @@ def save_model_artifacts(model, history_parts, out_directory):
     """
     Saves:
       - SavedModel -> <out_directory>/saved_model/
-      - TFLite (float32) -> <out_directory>/model.tflite
+      - TFLite (float32) -> <out_directory>/model.tflite  (+ duplicate at /home/model.tflite if possible)
       - training_history.json -> <out_directory>/training_history.json
     """
     if not out_directory:
@@ -295,6 +261,7 @@ def save_model_artifacts(model, history_parts, out_directory):
     os.makedirs(out_directory, exist_ok=True)
     saved_model_dir = os.path.join(out_directory, "saved_model")
     tflite_path = os.path.join(out_directory, "model.tflite")
+    tflite_profiler_path = "/home/model.tflite"
     hist_path = os.path.join(out_directory, "training_history.json")
 
     # 1) SavedModel
@@ -303,10 +270,10 @@ def save_model_artifacts(model, history_parts, out_directory):
         model.save(saved_model_dir)
     except Exception as e:
         print(f"[AUG][ERROR] Saving SavedModel failed: {e}")
-        # Don't exit; still attempt TFLite from in-memory model
+        # Continue: we can still try TFLite conversion from in-memory or from any partial save.
 
     # 2) TFLite (float32) with fallback path
-    print(f"[AUG][SAVE] Converting to TFLite (float32) -> {tflite_path}")
+    print("[AUG][SAVE] Converting to TFLite (float32)")
     tflite_model = None
     try:
         conv = tf.lite.TFLiteConverter.from_keras_model(model)
@@ -323,12 +290,21 @@ def save_model_artifacts(model, history_parts, out_directory):
             print(f"[AUG][ERROR] TFLite conversion from SavedModel failed: {e2}")
 
     if tflite_model is not None:
+        # Write <out_dir>/model.tflite
         try:
             with open(tflite_path, "wb") as f:
                 f.write(tflite_model)
-            print("[AUG][SAVE] TFLite model written.")
+            print(f"[AUG][SAVE] TFLite model written -> {tflite_path}")
         except Exception as e:
             print(f"[AUG][ERROR] Writing TFLite file failed: {e}")
+
+        # Also write /home/model.tflite for EI profiler
+        try:
+            with open(tflite_profiler_path, "wb") as f:
+                f.write(tflite_model)
+            print(f"[AUG][SAVE] TFLite profiler copy written -> {tflite_profiler_path}")
+        except Exception as e:
+            print(f"[AUG][WARN] Could not write profiler copy ({tflite_profiler_path}): {e}")
 
     # 3) Training history (merged)
     try:
@@ -338,3 +314,69 @@ def save_model_artifacts(model, history_parts, out_directory):
         print(f"[AUG][SAVE] Training history written -> {hist_path}")
     except Exception as e:
         print(f"[AUG][ERROR] Writing training history failed: {e}")
+
+
+# ---------------- Main: load data, train, save ----------------
+def _pick(dd, candidates):
+    for name in candidates:
+        p = os.path.join(dd, name)
+        if os.path.exists(p):
+            return p
+    raise FileNotFoundError(f"None of {candidates} found under {dd}")
+
+
+def _to_nhwc(x):
+    if x.ndim == 2:
+        if x.shape[1] != EXPECTED_FEAT_LEN:
+            raise ValueError(f"Feature length {x.shape[1]} != expected {EXPECTED_FEAT_LEN}")
+        x = x.reshape((-1, IMG_H, IMG_W, C))
+    if x.ndim != 4 or x.shape[1:] != (IMG_H, IMG_W, C):
+        raise ValueError(f"Bad tensor shape: got {x.shape}, expected (N,{IMG_H},{IMG_W},{C})")
+    return x.astype(np.float32, copy=False)
+
+
+if __name__ == "__main__":
+    dd = args.data_directory
+    print(f"[AUG] Loading data from: {dd}")
+    print("Directory listing:", sorted(os.listdir(dd)))
+
+    paths = {
+        "x_train": ["X_split_train.npy", "X_train_features.npy"],
+        "y_train": ["Y_split_train.npy", "y_train.npy"],
+        "x_val": ["X_split_test.npy", "X_validate_features.npy"],
+        "y_val": ["Y_split_test.npy", "y_validate.npy"],
+    }
+
+    x_train = np.load(_pick(dd, paths["x_train"]))
+    y_train = np.load(_pick(dd, paths["y_train"]))
+    x_val = np.load(_pick(dd, paths["x_val"]))
+    y_val = np.load(_pick(dd, paths["y_val"]))
+
+    x_train = _to_nhwc(x_train)
+    x_val = _to_nhwc(x_val)
+
+    # Determine NUM_CLASSES safely and fix labels if they are one-hot
+    if y_train.ndim == 2 and y_val.ndim == 2:
+        if y_train.shape[1] != y_val.shape[1]]:
+            raise ValueError(
+                f"Label-space mismatch: train one-hot width={y_train.shape[1]} vs val width={y_val.shape[1]}"
+            )
+        NUM_CLASSES = int(y_train.shape[1])
+        y_train = y_train.argmax(axis=1)
+        y_val = y_val.argmax(axis=1)
+    elif y_train.ndim == 1 and y_val.ndim == 1:
+        NUM_CLASSES = int(max(y_train.max(), y_val.max()) + 1)
+    else:
+        raise ValueError("Inconsistent label shapes between train/val")
+
+    # One-hot for AUG loss (CategoricalCrossentropy with from_logits=True)
+    y_train = tf.one_hot(y_train, NUM_CLASSES).numpy()
+    y_val = tf.one_hot(y_val, NUM_CLASSES).numpy()
+
+    # Train
+    model, hist_parts = compile_and_train(
+        x_train, y_train, x_val, y_val, NUM_CLASSES, vars(args), class_weights=None
+    )
+
+    # Save (writes both <out_dir>/model.tflite and /home/model.tflite)
+    save_model_artifacts(model, hist_parts, args.out_directory)
