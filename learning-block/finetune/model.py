@@ -11,22 +11,19 @@ parser = argparse.ArgumentParser(
     description="Fine-tune MobileNetV2 @96x96 (robust loader)"
 )
 parser.add_argument("--data-directory", type=str, required=True)
-parser.add_argument("--epochs", type=int, required=True)
-parser.add_argument(
-    "--learning-rate", type=float, required=True
-)  # This is your Warmup LR
 parser.add_argument("--out-directory", type=str, required=True)
 
-# Make sure these lines match (no extra keywords at the end)
-parser.add_argument("--warmup_epochs", type=int, required=True, default=8)
-parser.add_argument("--fine_tune_start_lr", type=float, required=True, default=0.0001)
-parser.add_argument("--batch_size", type=int, required=True, default=64)
-parser.add_argument("--label_smoothing", type=float, required=True, default=0.1)
-parser.add_argument("--early_stopping_patience", type=int, required=True, default=10)
-
-args, _ = parser.parse_known_args()
-# (Add any other args from your JSON you want to use)
-
+# Optional CLI fallbacks (used only if parameters.json doesn't provide them)
+parser.add_argument("--epochs", type=int, default=30)
+parser.add_argument("--learning-rate", type=float, default=1e-4)  # warmup LR
+parser.add_argument("--warmup-epochs", type=int, default=6)
+parser.add_argument("--fine-tune-start-lr", type=float, default=1e-4)  # cosine start LR
+parser.add_argument("--batch-size", type=int, default=64)
+parser.add_argument("--label-smoothing", type=float, default=0.1)
+parser.add_argument("--early-stopping-patience", type=int, default=8)
+parser.add_argument("--unfreeze-pct", type=float, default=0.7)  # top % to unfreeze
+parser.add_argument("--mixup-alpha", type=float, default=0.0)  # 0 disables
+parser.add_argument("--cutmix-alpha", type=float, default=0.0)  # 0 disables
 args, _ = parser.parse_known_args()
 
 IMG_HEIGHT = 96
