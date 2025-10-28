@@ -44,7 +44,7 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs (backbone frozen)",
-                "defaultValue": 8,
+                "defaultValue": 12,
                 "minimum": 0,
                 "maximum": 30,
                 "category": "training"
