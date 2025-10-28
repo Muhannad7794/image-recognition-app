@@ -11,11 +11,16 @@ parser = argparse.ArgumentParser(
     description="Fine-tune MobileNetV2 @96x96 (robust loader)"
 )
 parser.add_argument("--data-directory", type=str, required=True)
-parser.add_argument("--epochs", type=int, required=True)  # e.g., 50
-parser.add_argument(
-    "--learning-rate", type=float, required=True
-)  # warmup LR, e.g., 1e-3
+parser.add_argument("--epochs", type=int, required=True)
+parser.add_argument("--learning-rate", type=float, required=True) # This is your Warmup LR
 parser.add_argument("--out-directory", type=str, required=True)
+parser.add_argument("--warmup-epochs", type=int, required=True, default=8)
+parser.add_argument("--fine-tune-start-lr", type=float, required=True, default=0.0001)
+parser.add_argument("--batch-size", type=int, required=True, default=64)
+parser.add_argument("--label-smoothing", type=float, required=True, default=0.1)
+parser.add_argument("--early-stopping-patience", type=int, required=True, default=10)
+# (Add any other args from your JSON you want to use)
+
 args, _ = parser.parse_known_args()
 
 IMG_HEIGHT = 96
@@ -23,11 +28,11 @@ IMG_WIDTH = 96
 CHANNELS = 3
 INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
 
-WARMUP_EPOCHS = 3  # brief warmup frozen
-LABEL_SMOOTH = 0.10
-BATCH_SIZE = 64
-FT_START_LR = 1e-4  # starting LR for cosine decay when unfrozen
-
+# Use the arguments from the UI
+WARMUP_EPOCHS = args.warmup_epochs
+LABEL_SMOOTH = args.label_smoothing
+BATCH_SIZE = args.batch_size
+FT_START_LR = args.fine_tune_start_lr
 print(f"[FT] Data dir: {args.data_directory}")
 
 
@@ -147,7 +152,7 @@ def make_ds(x, y, training=True):
     ds = ds.map(
         lambda xi, yi: (xi, to_one_hot(yi)), num_parallel_calls=tf.data.AUTOTUNE
     )
-    ds = ds.batch(64).prefetch(tf.data.AUTOTUNE)
+    ds = ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE) # <-- NOW USES THE VARIABLE
     return ds
 
 
@@ -193,7 +198,8 @@ print(f"[FT] Warmup {WARMUP_EPOCHS} epochs @ lr={args.learning_rate}")
 model.compile(
     optimizer=keras.optimizers.Adam(args.learning_rate), loss=loss, metrics=metrics
 )
-es = EarlyStopping(monitor="val_loss", patience=8, restore_best_weights=True, verbose=1)
+
+es = EarlyStopping(monitor="val_loss", patience=args.early_stopping_patience, restore_best_weights=True, verbose=1)
 
 hist_warm = model.fit(
     train_ds,
