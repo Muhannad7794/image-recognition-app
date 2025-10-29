@@ -27,7 +27,7 @@
                 "name": "epochs",
                 "type": "int",
                 "label": "Total epochs (warmup + finetune)",
-                "defaultValue": 50,
+                "defaultValue": 70,
                 "minimum": 5,
                 "category": "training"
             },
@@ -35,7 +35,7 @@
                 "name": "learning_rate",
                 "type": "float",
                 "label": "Warmup learning rate (frozen backbone)",
-                "defaultValue": 0.001,
+                "defaultValue": 0.0005,
                 "minimum": 0.00001,
                 "maximum": 0.1,
                 "category": "training"
@@ -44,7 +44,7 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs (backbone frozen)",
-                "defaultValue": 30,
+                "defaultValue": 50,
                 "minimum": 0,
                 "maximum": 30,
                 "category": "training"
@@ -53,7 +53,7 @@
                 "name": "fine_tune_start_lr",
                 "type": "float",
                 "label": "Finetune start LR (cosine decay)",
-                "defaultValue": 0.0001,
+                "defaultValue": 0.0005,
                 "minimum": 0.000001,
                 "maximum": 0.01,
                 "category": "training"
@@ -105,7 +105,7 @@
                 "name": "augment_strength",
                 "type": "choice",
                 "label": "Augmentation strength",
-                "defaultValue": "medium",
+                "defaultValue": "light",
                 "options": [
                     "off",
                     "light",
