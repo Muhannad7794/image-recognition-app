@@ -44,7 +44,7 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs (backbone frozen)",
-                "defaultValue": 12,
+                "defaultValue": 30,
                 "minimum": 0,
                 "maximum": 30,
                 "category": "training"
@@ -80,16 +80,16 @@
                 "name": "label_smoothing",
                 "type": "float",
                 "label": "Label smoothing",
-                "defaultValue": 0.1,
+                "defaultValue": 0.03,
                 "minimum": 0.0,
-                "maximum": 0.3,
+                "maximum": 0.1,
                 "category": "regularization"
             },
             {
                 "name": "use_class_weights",
                 "type": "bool",
                 "label": "Use balanced class weights",
-                "defaultValue": true,
+                "defaultValue": false,
                 "category": "regularization"
             },
             {

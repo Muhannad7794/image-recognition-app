@@ -52,7 +52,7 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs",
-                "defaultValue": 6,
+                "defaultValue": 20,
                 "minimum": 0,
                 "category": "training"
             },
@@ -78,34 +78,34 @@
                 "name": "label_smoothing",
                 "type": "float",
                 "label": "Label smoothing",
-                "defaultValue": 0.1,
+                "defaultValue": 0.03,
                 "minimum": 0.0,
-                "maximum": 0.2,
+                "maximum": 0.1,
                 "category": "training"
             },
             {
                 "name": "use_class_weights",
                 "type": "bool",
                 "label": "Use class weights",
-                "defaultValue": true,
+                "defaultValue": false,
                 "category": "training"
             },
             {
                 "name": "mixup_alpha",
                 "type": "float",
                 "label": "MixUp alpha",
-                "defaultValue": 0.2,
+                "defaultValue": 0.0,
                 "minimum": 0.0,
-                "maximum": 1.0,
+                "maximum": 0.0,
                 "category": "augmentation"
             },
             {
                 "name": "cutmix_alpha",
                 "type": "float",
                 "label": "CutMix alpha",
-                "defaultValue": 0.2,
+                "defaultValue": 0.0,
                 "minimum": 0.0,
-                "maximum": 1.0,
+                "maximum": 0.0,
                 "category": "augmentation"
             }
         ]
