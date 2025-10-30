@@ -99,18 +99,27 @@ def pick(name, default=None):
     return default if v is None else v
 
 
-# -------------------- Effective hyperparameters (JSON first, then CLI) --------------------
+def as_int(name):
+    v = pick(name, None)
+    return None if v is None else int(v)
+
+
+def as_float(name):
+    v = pick(name, None)
+    return None if v is None else float(v)
+
+
 HP = {
-    "epochs": int(pick("epochs", 50)),
-    "learning_rate": float(pick("learning_rate", 1e-3)),  # warmup (frozen)
-    "warmup_epochs": int(pick("warmup_epochs", 12)),
-    "fine_tune_start_lr": float(pick("fine_tune_start_lr", 1e-4)),  # start of cosine
-    "fine_tune_fraction": float(pick("fine_tune_fraction", 1.0)),  # 1.0 = unfreeze all
-    "batch_size": int(pick("batch_size", 64)),
-    "label_smoothing": float(pick("label_smoothing", 0.1)),
-    "use_class_weights": _to_bool(pick("use_class_weights", True)),
-    "early_stopping_patience": int(pick("early_stopping_patience", 10)),
-    "augment_strength": str(pick("augment_strength", "medium")).lower(),
+    "epochs": as_int("epochs"),
+    "learning_rate": as_float("learning_rate"),
+    "warmup_epochs": as_int("warmup_epochs"),
+    "fine_tune_start_lr": as_float("fine_tune_start_lr"),
+    "fine_tune_fraction": as_float("fine_tune_fraction"),
+    "batch_size": as_int("batch_size"),
+    "label_smoothing": as_float("label_smoothing"),
+    "use_class_weights": _to_bool(pick("use_class_weights", None)),
+    "early_stopping_patience": as_int("early_stopping_patience"),
+    "augment_strength": str(pick("augment_strength", None)).lower(),
 }
 
 # Validate required ones
@@ -367,12 +376,16 @@ es = EarlyStopping(
     verbose=1,
 )
 
+callbacks = []
+if HP["early_stopping_patience"] > 0:
+    callbacks.append(es)
+
 hist_warm = model.fit(
     train_ds,
     validation_data=val_ds,
     epochs=HP["warmup_epochs"],
     class_weight=class_weight,
-    callbacks=[es],
+    callbacks=callbacks,
     verbose=2,
 )
 
@@ -404,7 +417,7 @@ hist_ft = model.fit(
     initial_epoch=len(hist_warm.epoch),
     epochs=HP["epochs"],
     class_weight=class_weight,
-    callbacks=[es],
+    callbacks=callbacks,
     verbose=2,
 )
 

@@ -35,7 +35,7 @@
                 "name": "learning_rate",
                 "type": "float",
                 "label": "Warmup learning rate (frozen backbone)",
-                "defaultValue": 0.0005,
+                "defaultValue": 0.0001,
                 "minimum": 0.00001,
                 "maximum": 0.1,
                 "category": "training"
@@ -53,7 +53,7 @@
                 "name": "fine_tune_start_lr",
                 "type": "float",
                 "label": "Finetune start LR (cosine decay)",
-                "defaultValue": 0.0005,
+                "defaultValue": 0.0001,
                 "minimum": 0.000001,
                 "maximum": 0.01,
                 "category": "training"
@@ -80,9 +80,9 @@
                 "name": "label_smoothing",
                 "type": "float",
                 "label": "Label smoothing",
-                "defaultValue": 0.03,
+                "defaultValue": 0.00,
                 "minimum": 0.0,
-                "maximum": 0.1,
+                "maximum": 0.0,
                 "category": "regularization"
             },
             {

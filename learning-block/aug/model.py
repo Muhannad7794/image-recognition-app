@@ -94,19 +94,29 @@ def pick(name, default=None):
     return default if v is None else v
 
 
+def as_int(name):
+    v = pick(name, None)
+    return None if v is None else int(v)
+
+
+def as_float(name):
+    v = pick(name, None)
+    return None if v is None else float(v)
+
+
 HP = {
-    "epochs": int(pick("epochs", 2)),
-    "learning_rate": float(pick("learning_rate", 0.0005)),
-    "batch_size": int(pick("batch_size", 64)),
-    "warmup_epochs": int(pick("warmup_epochs", 1)),
-    "unfreeze_pct": float(pick("unfreeze_pct", 0.7)),
-    "weight_decay": float(pick("weight_decay", 0.0001)),
-    "label_smoothing": float(pick("label_smoothing", 0.0)),
-    "use_class_weights": _to_bool(pick("use_class_weights", False)),
-    "mixup_alpha": float(pick("mixup_alpha", 0.0)),
-    "cutmix_alpha": float(pick("cutmix_alpha", 0.0)),
-    "early_stopping_patience": int(pick("early_stopping_patience", 8)),
-    "early_stopping_min_delta": float(pick("early_stopping_min_delta", 0.002)),
+    "epochs": as_int("epochs"),
+    "learning_rate": as_float("learning_rate"),
+    "batch_size": as_int("batch_size"),
+    "warmup_epochs": as_int("warmup_epochs"),
+    "unfreeze_pct": as_float("unfreeze_pct"),
+    "weight_decay": as_float("weight_decay"),
+    "label_smoothing": as_float("label_smoothing"),
+    "use_class_weights": _to_bool(pick("use_class_weights", None)),
+    "mixup_alpha": as_float("mixup_alpha"),
+    "cutmix_alpha": as_float("cutmix_alpha"),
+    "early_stopping_patience": as_int("early_stopping_patience"),
+    "early_stopping_min_delta": as_float("early_stopping_min_delta"),
 }
 
 # Validate the ones we truly need
@@ -464,7 +474,7 @@ else:
     print("[AUG] Using ImageNet MobileNetV2 weights")
 
 base.trainable = False  # warmup: frozen
-x = base(x, training=False)
+x = base(x)
 x = layers.GlobalAveragePooling2D(name="gap")(x)
 x = layers.Dropout(0.3, name="dropout")(x)
 outputs = layers.Dense(
@@ -494,6 +504,7 @@ except Exception:
     print("[AUG] Optimizer: Adam (AdamW not available)")
 
 model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+
 es = EarlyStopping(
     monitor="val_loss",
     patience=HP["early_stopping_patience"],
@@ -549,7 +560,7 @@ hist_ft = model.fit(
     initial_epoch=len(hist_warm.epoch),
     epochs=HP["epochs"],
     class_weight=class_weight,
-    callbacks=[es],
+    callbacks=callbacks,
     verbose=2,
 )
 
