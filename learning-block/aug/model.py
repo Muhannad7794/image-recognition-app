@@ -52,28 +52,86 @@ p.add_argument(
 args, _ = p.parse_known_args()
 print("[DBG] sys.argv =", sys.argv)
 
+RUN_PARAMS = os.path.join(
+    args.data_directory, "parameters.json"
+)  # /home/parameters.json
+BLOCK_PARAMS = os.path.join(
+    os.getcwd(), "parameters.json"
+)  # repo manifest (learning-block-*/parameters.json)
+
 
 # -------------------- Load parameters.json (source of truth) --------------------
-def load_params_json():
-    candidates = [
-        os.path.join(args.data_directory, "parameters.json"),
-        os.path.join(os.getcwd(), "parameters.json"),
-    ]
-    cfg = {}
-    for path in candidates:
-        if os.path.exists(path):
-            try:
-                with open(path, "r") as f:
-                    cfg = json.load(f) or {}
-                print(f"[CFG] Loaded {path}")
-                break
-            except Exception as e:
-                print(f"[CFG][WARN] Could not parse {path}: {e}")
-    # normalize keys: kebab->underscore
-    return {k.replace("-", "_"): v for k, v in cfg.items()}
+def load_json_safe(p):
+    try:
+        if os.path.exists(p):
+            with open(p, "r") as f:
+                return json.load(f) or {}
+    except Exception as e:
+        print(f"[CFG][WARN] Could not parse {p}: {e}")
+    return {}
 
 
-cfg = load_params_json()
+# 1) what EI passed for this run
+run_cfg = load_json_safe(RUN_PARAMS)
+# 2) your block's manifest defaults (complete list of args & their defaultValue)
+repo_cfg = load_json_safe(BLOCK_PARAMS)
+
+
+def extract_manifest_defaults(manifest: dict) -> dict:
+    """Turn the block manifest's training.arguments list into a flat {name: defaultValue} map."""
+    out = {}
+    try:
+        args = manifest.get("training", {}).get("arguments", []) or []
+        for a in args:
+            name = a.get("name")
+            if not name:
+                continue
+            dv = a.get("defaultValue", None)
+            # normalize kebab→underscore for names to match your code
+            out[name.replace("-", "_")] = dv
+    except Exception as e:
+        print(f"[CFG][WARN] Could not extract defaults from manifest: {e}")
+    return out
+
+
+repo_defaults = extract_manifest_defaults(repo_cfg)
+
+
+# normalize run_cfg keys once (kebab → underscore)
+def norm_keys(d):
+    return {k.replace("-", "_"): v for k, v in d.items()}
+
+
+run_cfg = norm_keys(run_cfg)
+
+# CLI overrides (already normalized by how you named dest=)
+cli_cfg = {}
+for k in [
+    "epochs",
+    "learning_rate",
+    "batch_size",
+    "warmup_epochs",
+    "unfreeze_pct",
+    "weight_decay",
+    "label_smoothing",
+    "use_class_weights",
+    "mixup_alpha",
+    "cutmix_alpha",
+    "early_stopping_patience",
+    "early_stopping_min_delta",
+    "fine_tune_start_lr",
+    "fine_tune_fraction",
+]:
+    v = getattr(args, k, None)
+    if v is not None:
+        cli_cfg[k] = v
+
+# FINAL precedence: repo_defaults  <  CLI  <  run_cfg
+cfg = {**repo_defaults, **cli_cfg, **run_cfg}
+
+print("[CFG] repo defaults:", json.dumps(repo_defaults, indent=2, sort_keys=True))
+print("[CFG] run  params  :", json.dumps(run_cfg, indent=2, sort_keys=True))
+print("[CFG] using        :", json.dumps(cfg, indent=2, sort_keys=True))
 
 
 def _to_bool(v):
@@ -94,50 +152,57 @@ def pick(name, default=None):
     return default if v is None else v
 
 
-def as_int(name):
-    v = pick(name, None)
-    return None if v is None else int(v)
+def as_int(x):
+    return None if x is None else int(x)
 
 
-def as_float(name):
-    v = pick(name, None)
-    return None if v is None else float(v)
+def as_float(x):
+    return None if x is None else float(x)
+
+
+def as_bool(x):
+    if x is None:
+        return None
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, (int, float)):
+        return bool(x)
+    return str(x).strip().lower() in {"1", "true", "y", "yes", "t"}
 
 
 HP = {
-    "epochs": as_int("epochs"),
-    "learning_rate": as_float("learning_rate"),
-    "batch_size": as_int("batch_size"),
-    "warmup_epochs": as_int("warmup_epochs"),
-    "unfreeze_pct": as_float("unfreeze_pct"),
-    "weight_decay": as_float("weight_decay"),
-    "label_smoothing": as_float("label_smoothing"),
-    "use_class_weights": _to_bool(pick("use_class_weights", None)),
-    "mixup_alpha": as_float("mixup_alpha"),
-    "cutmix_alpha": as_float("cutmix_alpha"),
-    "early_stopping_patience": as_int("early_stopping_patience"),
-    "early_stopping_min_delta": as_float("early_stopping_min_delta"),
+    "epochs": as_int(cfg.get("epochs")),
+    "learning_rate": as_float(cfg.get("learning_rate")),
+    "batch_size": as_int(cfg.get("batch_size")),
+    "warmup_epochs": as_int(cfg.get("warmup_epochs")),
+    "unfreeze_pct": as_float(cfg.get("unfreeze_pct")),
+    "weight_decay": as_float(cfg.get("weight_decay")),
+    "label_smoothing": as_float(cfg.get("label_smoothing")),
+    "use_class_weights": as_bool(cfg.get("use_class_weights")),
+    "mixup_alpha": as_float(cfg.get("mixup_alpha")),
+    "cutmix_alpha": as_float(cfg.get("cutmix_alpha")),
+    "early_stopping_patience": as_int(cfg.get("early_stopping_patience")),
+    "early_stopping_min_delta": as_float(cfg.get("early_stopping_min_delta")),
+    # finetune-only (safe to ignore in AUG):
+    "fine_tune_start_lr": as_float(cfg.get("fine_tune_start_lr")),
+    "fine_tune_fraction": as_float(cfg.get("fine_tune_fraction")),
 }
 
-# Validate the ones we truly need
-missing = [
-    k
-    for k in [
-        "epochs",
-        "learning_rate",
-        "batch_size",
-        "warmup_epochs",
-        "unfreeze_pct",
-        "weight_decay",
-        "label_smoothing",
-    ]
-    if HP.get(k) is None
+# Required args:
+required_aug = [
+    "epochs",
+    "learning_rate",
+    "batch_size",
+    "warmup_epochs",
+    "unfreeze_pct",
+    "weight_decay",
+    "label_smoothing",
 ]
+missing = [k for k in required_aug if HP[k] is None]
 if missing:
-    print("[FATAL] Missing hyperparameters:", missing)
+    print("[FATAL] Missing hyperparameters (after merge):", missing)
+    print("Ensure they exist in the block manifest or are passed via CLI/run params.")
     sys.exit(2)
-
-print("[HP] Effective hyperparameters:", HP)
 
 # -------------------- Constants --------------------
 IMG_H, IMG_W, C = 96, 96, 3
