@@ -102,9 +102,9 @@ HP = {
     "unfreeze_pct": float(pick("unfreeze_pct", 0.7)),
     "weight_decay": float(pick("weight_decay", 1e-4)),
     "label_smoothing": float(pick("label_smoothing", 0.1)),
-    "use_class_weights": _to_bool(pick("use_class_weights", True)),
-    "mixup_alpha": float(pick("mixup_alpha", 0.2)),
-    "cutmix_alpha": float(pick("cutmix_alpha", 0.2)),
+    "use_class_weights": _to_bool(pick("use_class_weights", False)),
+    "mixup_alpha": float(pick("mixup_alpha", 0.0)),
+    "cutmix_alpha": float(pick("cutmix_alpha", 0.0)),
     "early_stopping_patience": int(pick("early_stopping_patience", 8)),
     "early_stopping_min_delta": float(pick("early_stopping_min_delta", 0.002)),
 }
