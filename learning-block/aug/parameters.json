@@ -35,7 +35,7 @@
                 "name": "learning_rate",
                 "type": "float",
                 "label": "Base learning rate",
-                "defaultValue": 0.0001,
+                "defaultValue": 0.00001,
                 "minimum": 0.00001,
                 "maximum": 0.1,
                 "category": "training"
@@ -60,7 +60,7 @@
                 "name": "unfreeze_pct",
                 "type": "float",
                 "label": "Backbone unfreeze percentage (0-1)",
-                "defaultValue": 0.7,
+                "defaultValue": 0.2,
                 "minimum": 0.0,
                 "maximum": 1.0,
                 "category": "training"
