@@ -27,7 +27,7 @@
                 "name": "epochs",
                 "type": "int",
                 "label": "Number of epochs",
-                "defaultValue": 60,
+                "defaultValue": 1,
                 "minimum": 1,
                 "category": "training"
             },
@@ -52,7 +52,7 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs",
-                "defaultValue": 40,
+                "defaultValue": 1,
                 "minimum": 0,
                 "category": "training"
             },
@@ -78,7 +78,7 @@
                 "name": "label_smoothing",
                 "type": "float",
                 "label": "Label smoothing",
-                "defaultValue": 0.03,
+                "defaultValue": 0.0,
                 "minimum": 0.0,
                 "maximum": 0.1,
                 "category": "training"
