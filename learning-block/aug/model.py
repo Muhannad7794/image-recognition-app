@@ -95,13 +95,13 @@ def pick(name, default=None):
 
 
 HP = {
-    "epochs": int(pick("epochs", 40)),
-    "learning_rate": float(pick("learning_rate", 1e-4)),
+    "epochs": int(pick("epochs", 2)),
+    "learning_rate": float(pick("learning_rate", 0.0005)),
     "batch_size": int(pick("batch_size", 64)),
-    "warmup_epochs": int(pick("warmup_epochs", 6)),
+    "warmup_epochs": int(pick("warmup_epochs", 1)),
     "unfreeze_pct": float(pick("unfreeze_pct", 0.7)),
-    "weight_decay": float(pick("weight_decay", 1e-4)),
-    "label_smoothing": float(pick("label_smoothing", 0.1)),
+    "weight_decay": float(pick("weight_decay", 0.0001)),
+    "label_smoothing": float(pick("label_smoothing", 0.0)),
     "use_class_weights": _to_bool(pick("use_class_weights", False)),
     "mixup_alpha": float(pick("mixup_alpha", 0.0)),
     "cutmix_alpha": float(pick("cutmix_alpha", 0.0)),
