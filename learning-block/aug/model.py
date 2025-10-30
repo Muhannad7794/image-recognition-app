@@ -36,6 +36,18 @@ p.add_argument(
 )
 p.add_argument("--mixup-alpha", "--mixup_alpha", dest="mixup_alpha", type=float)
 p.add_argument("--cutmix-alpha", "--cutmix_alpha", dest="cutmix_alpha", type=float)
+p.add_argument(
+    "--early-stopping-patience",
+    "--early_stopping_patience",
+    dest="early_stopping_patience",
+    type=int,
+)
+p.add_argument(
+    "--early-stopping-min-delta",
+    "--early_stopping_min_delta",
+    dest="early_stopping_min_delta",
+    type=float,
+)
 
 args, _ = p.parse_known_args()
 print("[DBG] sys.argv =", sys.argv)
@@ -93,6 +105,8 @@ HP = {
     "use_class_weights": _to_bool(pick("use_class_weights", True)),
     "mixup_alpha": float(pick("mixup_alpha", 0.2)),
     "cutmix_alpha": float(pick("cutmix_alpha", 0.2)),
+    "early_stopping_patience": int(pick("early_stopping_patience", 8)),
+    "early_stopping_min_delta": float(pick("early_stopping_min_delta", 0.002)),
 }
 
 # Validate the ones we truly need
@@ -482,18 +496,22 @@ except Exception:
 model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
 es = EarlyStopping(
     monitor="val_loss",
-    patience=8,
+    patience=HP["early_stopping_patience"],
+    min_delta=HP["early_stopping_min_delta"],
     restore_best_weights=True,
     verbose=1,
-    min_delta=0.002,
 )
+
+callbacks = []
+if HP["early_stopping_patience"] > 0:
+    callbacks.append(es)
 
 hist_warm = model.fit(
     train_ds,
     validation_data=val_ds,
     epochs=HP["warmup_epochs"],
     class_weight=class_weight,
-    callbacks=[es],
+    callbacks=callbacks,
     verbose=2,
 )
 

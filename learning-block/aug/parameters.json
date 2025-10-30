@@ -27,7 +27,7 @@
                 "name": "epochs",
                 "type": "int",
                 "label": "Number of epochs",
-                "defaultValue": 1,
+                "defaultValue": 2,
                 "minimum": 1,
                 "category": "training"
             },
@@ -80,7 +80,7 @@
                 "label": "Label smoothing",
                 "defaultValue": 0.0,
                 "minimum": 0.0,
-                "maximum": 0.1,
+                "maximum": 0.0,
                 "category": "training"
             },
             {
@@ -107,6 +107,24 @@
                 "minimum": 0.0,
                 "maximum": 0.0,
                 "category": "augmentation"
+            },
+            {
+                "name": "early_stopping_patience",
+                "type": "int",
+                "label": "Early stopping patience (val_loss)",
+                "defaultValue": 8,
+                "minimum": 1,
+                "maximum": 50,
+                "category": "training"
+            },
+            {
+                "name": "early_stopping_min_delta",
+                "type": "float",
+                "label": "Early stopping min_delta",
+                "defaultValue": 0.002,
+                "minimum": 0.0,
+                "maximum": 0.1,
+                "category": "training"
             }
         ]
     }
