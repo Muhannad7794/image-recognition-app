@@ -458,6 +458,10 @@ hist_warm = model.fit(
     verbose=2,
 )
 
+# DEBUG: print evaluate to confirm the head can separate
+eval_warm = model.evaluate(val_ds, verbose=0)
+print(f"[AUG] Warmup eval: {model.metrics_names} = {eval_warm}")
+
 
 # -------------------- Phase 2: Finetune (unfreeze fraction; BN frozen) --------------------
 def set_finetune_trainable_fraction(base_model, fraction: float):

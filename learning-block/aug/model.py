@@ -355,8 +355,6 @@ def set_finetune_trainable(base_model, unfreeze_pct: float):
     return cutoff, n
 
 
-
-
 # Ensure NHWC float32
 def to_nhwc(x: np.ndarray, name: str) -> np.ndarray:
     if x.ndim == 2:
@@ -600,6 +598,9 @@ hist_warm = model.fit(
     callbacks=callbacks,
     verbose=2,
 )
+# DEBUG: print evaluate to confirm the head can separate
+eval_warm = model.evaluate(val_ds, verbose=0)
+print(f"[AUG] Warmup eval: {model.metrics_names} = {eval_warm}")
 
 # -------------------- Phase 2: Fine-tune (respect JSON; freeze BN) --------------------
 cutoff, n_layers = set_finetune_trainable(base, HP["unfreeze_pct"])

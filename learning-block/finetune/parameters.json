@@ -44,7 +44,7 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs (backbone frozen)",
-                "defaultValue": 18,
+                "defaultValue": 7,
                 "minimum": 0,
                 "maximum": 30,
                 "category": "training"
@@ -53,7 +53,7 @@
                 "name": "fine_tune_start_lr",
                 "type": "float",
                 "label": "Finetune start LR (cosine decay)",
-                "defaultValue": 1e-5,
+                "defaultValue": 3e-5,
                 "minimum": 0.000001,
                 "maximum": 0.01,
                 "category": "training"
@@ -80,7 +80,7 @@
                 "name": "label_smoothing",
                 "type": "float",
                 "label": "Label smoothing",
-                "defaultValue": 0.05,
+                "defaultValue": 0.01,
                 "minimum": 0.0,
                 "maximum": 0.0,
                 "category": "regularization"
@@ -105,7 +105,7 @@
                 "name": "augment_strength",
                 "type": "choice",
                 "label": "Augmentation strength",
-                "defaultValue": "light",
+                "defaultValue": "medium",
                 "options": [
                     "off",
                     "light",
