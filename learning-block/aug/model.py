@@ -7,6 +7,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.layers import BatchNormalization
 
 # -------------------- Argparse (aliases for dash/underscore) --------------------
 p = argparse.ArgumentParser(description="AUG MobileNetV2 @96x96 (robust loader)")
@@ -343,6 +344,21 @@ else:
 # End debug
 
 
+def set_finetune_trainable(base_model, unfreeze_pct: float):
+    n = len(base_model.layers)
+    cutoff = int((1.0 - float(unfreeze_pct)) * n)
+    for i, layer in enumerate(base_model.layers):
+        if i >= cutoff:
+            layer.trainable = not isinstance(layer, BatchNormalization)
+        else:
+            layer.trainable = False
+    return cutoff, n
+
+
+trainable = sum(int(l.trainable) for l in base.layers)
+print(f"[AUG] Base trainable layers: {trainable}/{len(base.layers)} (BN frozen)")
+
+
 # Ensure NHWC float32
 def to_nhwc(x: np.ndarray, name: str) -> np.ndarray:
     if x.ndim == 2:
@@ -538,20 +554,12 @@ else:
     )
     print("[AUG] Using ImageNet MobileNetV2 weights")
 
-base.trainable = False  # warmup: frozen
-# Pass 'training=False' so BatchNormalization layers run in inference mode
+base.trainable = False
 x = base(x, training=False)
-
-# This is the new head, based on the 36%-accurate EI default model.
-# It PRESERVES the 3x3 spatial data by reshaping/flattening it.
-x = layers.Reshape((-1, x.shape[3]), name="reshape_features")(x)  # (None, 9, 1280)
-x = layers.Dense(16, activation="relu", name="bottleneck_dense")(x)
-x = layers.Dropout(0.1, name="bottleneck_dropout")(x)
-x = layers.Flatten(name="flatten_bottleneck")(x)
-
-# Your loss function already expects 'softmax', so this is correct.
+# --- head (no L2 on the Dense when using AdamW) ---
+x = layers.GlobalAveragePooling2D(name="gap")(x)
+x = layers.Dropout(0.3, name="dropout")(x)
 outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
-
 model = keras.Model(inputs, outputs)
 
 # Loss & metrics
@@ -595,41 +603,27 @@ hist_warm = model.fit(
     verbose=2,
 )
 
-# -------------------- Phase 2: Fine-tune (unfreeze top N%) --------------------
-n_layers = len(base.layers)
-cutoff = int((1.0 - HP["unfreeze_pct"]) * n_layers)
-for i, layer in enumerate(base.layers):
-    layer.trainable = i >= cutoff
+# -------------------- Phase 2: Fine-tune (respect JSON; freeze BN) --------------------
+cutoff, n_layers = set_finetune_trainable(base, HP["unfreeze_pct"])
 print(
-    f"[AUG] Unfreezing top {HP['unfreeze_pct']*100:.1f}% (layers >= {cutoff}/{n_layers})"
+    f"[AUG] Unfreezing top {HP['unfreeze_pct']*100:.1f}% (layers >= {cutoff}/{n_layers}); BatchNorms frozen"
 )
 
-steps_per_epoch = int(np.ceil(len(x_train) / HP["batch_size"]))
-ft_epochs = max(HP["epochs"] - HP["warmup_epochs"], 1)
-decay_steps = steps_per_epoch * ft_epochs
-cosine_lr = keras.optimizers.schedules.CosineDecay(
-    initial_learning_rate=HP["learning_rate"], decay_steps=decay_steps
+ft_opt = keras.optimizers.AdamW(
+    learning_rate=HP["learning_rate"], weight_decay=HP["weight_decay"]  # JSON-driven
 )
-try:
-    ft_opt = keras.optimizers.AdamW(
-        learning_rate=cosine_lr, weight_decay=HP["weight_decay"]
-    )
-    print("[AUG] FT Optimizer: AdamW (cosine schedule)")
-except Exception:
-    ft_opt = keras.optimizers.Adam(learning_rate=cosine_lr)
-    print("[AUG] FT Optimizer: Adam (cosine schedule)")
+print("[AUG] FT Optimizer: AdamW")
 
 model.compile(optimizer=ft_opt, loss=loss, metrics=metrics)
 
 train_ft = with_mixups(make_ds(x_train, y_train, training=True))
-
 hist_ft = model.fit(
     train_ft,
     validation_data=val_ds,
     initial_epoch=len(hist_warm.epoch),
     epochs=HP["epochs"],
     class_weight=class_weight,
-    callbacks=callbacks,
+    callbacks=callbacks,  # <-- same callbacks you already built
     verbose=2,
 )
 

@@ -27,7 +27,7 @@
                 "name": "epochs",
                 "type": "int",
                 "label": "Number of epochs",
-                "defaultValue": 30,
+                "defaultValue": 40,
                 "minimum": 1,
                 "category": "training"
             },
@@ -52,7 +52,7 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs",
-                "defaultValue": 30,
+                "defaultValue": 20,
                 "minimum": 0,
                 "category": "training"
             },
@@ -69,7 +69,7 @@
                 "name": "weight_decay",
                 "type": "float",
                 "label": "AdamW weight decay",
-                "defaultValue": 0.0001,
+                "defaultValue": 0.00001,
                 "minimum": 0.0,
                 "maximum": 0.1,
                 "category": "training"
