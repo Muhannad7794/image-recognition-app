@@ -355,8 +355,6 @@ def set_finetune_trainable(base_model, unfreeze_pct: float):
     return cutoff, n
 
 
-trainable = sum(int(l.trainable) for l in base.layers)
-print(f"[AUG] Base trainable layers: {trainable}/{len(base.layers)} (BN frozen)")
 
 
 # Ensure NHWC float32
@@ -608,6 +606,8 @@ cutoff, n_layers = set_finetune_trainable(base, HP["unfreeze_pct"])
 print(
     f"[AUG] Unfreezing top {HP['unfreeze_pct']*100:.1f}% (layers >= {cutoff}/{n_layers}); BatchNorms frozen"
 )
+trainable = sum(int(l.trainable) for l in base.layers)
+print(f"[AUG] Base trainable layers: {trainable}/{len(base.layers)} (BN frozen)")
 
 ft_opt = keras.optimizers.AdamW(
     learning_rate=HP["learning_rate"], weight_decay=HP["weight_decay"]  # JSON-driven
