@@ -598,9 +598,13 @@ hist_warm = model.fit(
     callbacks=callbacks,
     verbose=2,
 )
-# DEBUG: print evaluate to confirm the head can separate
-eval_warm = model.evaluate(val_ds, verbose=0)
-print(f"[AUG] Warmup eval: {model.metrics_names} = {eval_warm}")
+
+# DEBUG: print evaluate to confirm the head can separate and learn
+eval_warm_val = model.evaluate(val_ds, verbose=0)
+eval_warm_tr = model.evaluate(train_ds, verbose=0)
+print(f"[DBG] Warmup VAL: {dict(zip(model.metrics_names, eval_warm_val))}")
+print(f"[DBG] Warmup TR : {dict(zip(model.metrics_names, eval_warm_tr))}")
+
 
 # -------------------- Phase 2: Fine-tune (respect JSON; freeze BN) --------------------
 cutoff, n_layers = set_finetune_trainable(base, HP["unfreeze_pct"])
@@ -624,9 +628,20 @@ hist_ft = model.fit(
     initial_epoch=len(hist_warm.epoch),
     epochs=HP["epochs"],
     class_weight=class_weight,
-    callbacks=callbacks,  # <-- same callbacks you already built
+    callbacks=callbacks,
     verbose=2,
 )
+
+# DEBUG: print what actually became trainable
+trainable = sum(int(l.trainable) for l in base.layers)
+print(f"[DBG] Base trainable layers: {trainable}/{len(base.layers)}")
+
+# confirm class weights exist
+if class_weight is not None:
+    print(
+        f"[DBG] class_weight keys: {len(class_weight)}; sample: {list(class_weight.items())[:5]}"
+    )
+
 
 # -------------------- Save (SavedModel + TFLite + /home/model.tflite) --------------------
 out_dir = args.out_directory

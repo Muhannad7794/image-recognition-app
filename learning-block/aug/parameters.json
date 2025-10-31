@@ -35,7 +35,7 @@
                 "name": "learning_rate",
                 "type": "float",
                 "label": "Base learning rate",
-                "defaultValue": 1e-4,
+                "defaultValue": 0.0003,
                 "minimum": 0.00001,
                 "maximum": 0.1,
                 "category": "training"
@@ -44,7 +44,7 @@
                 "name": "batch_size",
                 "type": "int",
                 "label": "Batch size",
-                "defaultValue": 64,
+                "defaultValue": 32,
                 "minimum": 8,
                 "category": "training"
             },
@@ -69,7 +69,7 @@
                 "name": "weight_decay",
                 "type": "float",
                 "label": "AdamW weight decay",
-                "defaultValue": 1e-5,
+                "defaultValue": 2e-5,
                 "minimum": 0.0,
                 "maximum": 0.1,
                 "category": "training"
@@ -80,7 +80,7 @@
                 "label": "Label smoothing",
                 "defaultValue": 0.01,
                 "minimum": 0.0,
-                "maximum": 0.03,
+                "maximum": 0.0,
                 "category": "training"
             },
             {
@@ -112,7 +112,7 @@
                 "name": "early_stopping_patience",
                 "type": "int",
                 "label": "Early stopping patience (val_loss)",
-                "defaultValue": 8,
+                "defaultValue": 12,
                 "minimum": 1,
                 "maximum": 50,
                 "category": "training"
@@ -121,7 +121,7 @@
                 "name": "early_stopping_min_delta",
                 "type": "float",
                 "label": "Early stopping min_delta",
-                "defaultValue": 0.002,
+                "defaultValue": 0.001,
                 "minimum": 0.0,
                 "maximum": 0.1,
                 "category": "training"

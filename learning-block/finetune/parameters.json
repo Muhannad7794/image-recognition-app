@@ -44,7 +44,7 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs (backbone frozen)",
-                "defaultValue": 7,
+                "defaultValue": 10,
                 "minimum": 0,
                 "maximum": 30,
                 "category": "training"
@@ -53,7 +53,7 @@
                 "name": "fine_tune_start_lr",
                 "type": "float",
                 "label": "Finetune start LR (cosine decay)",
-                "defaultValue": 3e-5,
+                "defaultValue": 1e-4,
                 "minimum": 0.000001,
                 "maximum": 0.01,
                 "category": "training"
@@ -71,7 +71,7 @@
                 "name": "batch_size",
                 "type": "int",
                 "label": "Batch size",
-                "defaultValue": 64,
+                "defaultValue": 32,
                 "minimum": 8,
                 "maximum": 256,
                 "category": "resources"
@@ -96,10 +96,19 @@
                 "name": "early_stopping_patience",
                 "type": "int",
                 "label": "Early stopping patience (val_loss)",
-                "defaultValue": 10,
+                "defaultValue": 15,
                 "minimum": 3,
                 "maximum": 20,
                 "category": "regularization"
+            },
+                        {
+                "name": "early_stopping_min_delta",
+                "type": "float",
+                "label": "Early stopping min_delta",
+                "defaultValue": 0.001,
+                "minimum": 0.0,
+                "maximum": 0.1,
+                "category": "training"
             },
             {
                 "name": "augment_strength",
