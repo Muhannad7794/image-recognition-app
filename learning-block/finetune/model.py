@@ -1,13 +1,11 @@
 # learning-block/finetune/model.py
-# MobileNetV2 (96x96) fine-tune: robust JSON/CLI params, correct scaling, warmup->finetune with cosine LR,
-# optional class weights, selectable augmentation strength, clean saving and debug logs.
-
 import os, sys, json, argparse
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.layers import BatchNormalization
 
 # -------------------- Argparse (aliases for underscore/dash) --------------------
 p = argparse.ArgumentParser(description="Fine-tune MobileNetV2 @96x96 (robust loader)")
@@ -22,7 +20,7 @@ p.add_argument(
     "--out-directory", "--out_directory", dest="out_directory", type=str, required=True
 )
 
-# hyperparams (match parameters.json names; accept dash aliases too)
+# Hyperparams (accept dash & underscore; names align with parameters.json)
 p.add_argument("--epochs", type=int)
 p.add_argument("--learning-rate", "--learning_rate", dest="learning_rate", type=float)
 p.add_argument("--warmup-epochs", "--warmup_epochs", dest="warmup_epochs", type=int)
@@ -55,101 +53,146 @@ p.add_argument(
     "--augment-strength", "--augment_strength", dest="augment_strength", type=str
 )
 
+# (Optional) allow AdamW via JSON if present; safe if absent
+p.add_argument("--weight-decay", "--weight_decay", dest="weight_decay", type=float)
+
 args, _ = p.parse_known_args()
 print("[DBG] sys.argv =", sys.argv)
 
-
 # -------------------- Load parameters.json (source of truth) --------------------
-def load_params_json():
-    candidates = [
-        os.path.join(args.data_directory, "parameters.json"),
-        os.path.join(os.getcwd(), "parameters.json"),
-    ]
-    cfg = {}
-    for path in candidates:
+RUN_PARAMS = os.path.join(
+    args.data_directory, "parameters.json"
+)  # /home/parameters.json
+BLOCK_PARAMS = os.path.join(os.getcwd(), "parameters.json")  # repo manifest defaults
+
+
+def load_json_safe(path):
+    try:
         if os.path.exists(path):
-            try:
-                with open(path, "r") as f:
-                    cfg = json.load(f) or {}
-                print(f"[CFG] Loaded {path}")
-                break
-            except Exception as e:
-                print(f"[CFG][WARN] Could not parse {path}: {e}")
-    # normalize keys: kebab->underscore
-    return {k.replace("-", "_"): v for k, v in cfg.items()}
+            with open(path, "r") as f:
+                return json.load(f) or {}
+    except Exception as e:
+        print(f"[CFG][WARN] Could not parse {path}: {e}")
+    return {}
 
 
-cfg = load_params_json()
+run_cfg_raw = load_json_safe(RUN_PARAMS)
+repo_cfg_raw = load_json_safe(BLOCK_PARAMS)
 
 
-def _to_bool(v):
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, (int, float)):
-        return bool(v)
-    if isinstance(v, str):
-        return v.strip().lower() in {"1", "true", "yes", "y", "t"}
-    return False
+def extract_manifest_defaults(manifest: dict) -> dict:
+    out = {}
+    try:
+        args_list = manifest.get("training", {}).get("arguments", []) or []
+        for a in args_list:
+            name = a.get("name")
+            if not name:
+                continue
+            dv = a.get("defaultValue", None)
+            out[name.replace("-", "_")] = dv  # normalize kebab->underscore
+    except Exception as e:
+        print(f"[CFG][WARN] Could not extract defaults from manifest: {e}")
+    return out
 
 
-def pick(name, default=None):
-    v = cfg.get(name, None)
-    if v is None:
-        v = getattr(args, name, None)
-    return default if v is None else v
+repo_defaults = extract_manifest_defaults(repo_cfg_raw)
 
 
-def as_int(name):
-    v = pick(name, None)
-    return None if v is None else int(v)
+def norm_keys(d):  # kebab->underscore once
+    return {(k.replace("-", "_") if isinstance(k, str) else k): v for k, v in d.items()}
 
 
-def as_float(name):
-    v = pick(name, None)
-    return None if v is None else float(v)
+run_cfg = norm_keys(run_cfg_raw)
+
+# CLI overrides (already normalized by dest=)
+cli_cfg = {}
+for k in [
+    "epochs",
+    "learning_rate",
+    "batch_size",
+    "warmup_epochs",
+    "fine_tune_start_lr",
+    "fine_tune_fraction",
+    "label_smoothing",
+    "use_class_weights",
+    "early_stopping_patience",
+    "augment_strength",
+    "weight_decay",
+]:
+    v = getattr(args, k, None)
+    if v is not None:
+        cli_cfg[k] = v
+
+# FINAL precedence: repo_defaults  <  CLI  <  run_cfg
+cfg = {**repo_defaults, **cli_cfg, **run_cfg}
+
+print("[CFG] repo defaults:", json.dumps(repo_defaults, indent=2, sort_keys=True))
+print("[CFG] run  params  :", json.dumps(run_cfg, indent=2, sort_keys=True))
+print("[CFG] using        :", json.dumps(cfg, indent=2, sort_keys=True))
+
+
+def as_int(x):
+    return None if x is None else int(x)
+
+
+def as_float(x):
+    return None if x is None else float(x)
+
+
+def as_bool(x):
+    if x is None:
+        return None
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, (int, float)):
+        return bool(x)
+    return str(x).strip().lower() in {"1", "true", "y", "yes", "t"}
 
 
 HP = {
-    "epochs": as_int("epochs"),
-    "learning_rate": as_float("learning_rate"),
-    "warmup_epochs": as_int("warmup_epochs"),
-    "fine_tune_start_lr": as_float("fine_tune_start_lr"),
-    "fine_tune_fraction": as_float("fine_tune_fraction"),
-    "batch_size": as_int("batch_size"),
-    "label_smoothing": as_float("label_smoothing"),
-    "use_class_weights": _to_bool(pick("use_class_weights", None)),
-    "early_stopping_patience": as_int("early_stopping_patience"),
-    "augment_strength": str(pick("augment_strength", None)).lower(),
+    "epochs": as_int(cfg.get("epochs")),
+    "learning_rate": as_float(cfg.get("learning_rate")),
+    "warmup_epochs": as_int(cfg.get("warmup_epochs")),
+    "fine_tune_start_lr": as_float(cfg.get("fine_tune_start_lr")),
+    "fine_tune_fraction": as_float(cfg.get("fine_tune_fraction")),
+    "batch_size": as_int(cfg.get("batch_size")),
+    "label_smoothing": as_float(cfg.get("label_smoothing")),
+    "use_class_weights": as_bool(cfg.get("use_class_weights")),
+    "early_stopping_patience": as_int(cfg.get("early_stopping_patience")),
+    "augment_strength": (
+        str(cfg.get("augment_strength"))
+        if cfg.get("augment_strength") is not None
+        else "medium"
+    ).lower(),
+    # optional: AdamW if provided in JSON/CLI; safe default 0.0 => Adam fallback
+    "weight_decay": as_float(cfg.get("weight_decay")),
 }
 
-# Validate required ones
-missing = [
-    k
-    for k in [
-        "epochs",
-        "learning_rate",
-        "warmup_epochs",
-        "fine_tune_start_lr",
-        "fine_tune_fraction",
-        "batch_size",
-        "label_smoothing",
-        "early_stopping_patience",
-        "augment_strength",
-    ]
-    if HP.get(k) is None
+# Required for finetune block
+required_ft = [
+    "epochs",
+    "learning_rate",
+    "warmup_epochs",
+    "fine_tune_start_lr",
+    "fine_tune_fraction",
+    "batch_size",
+    "label_smoothing",
+    "early_stopping_patience",
 ]
+missing = [k for k in required_ft if HP.get(k) is None]
 if missing:
-    print("[FATAL] Missing hyperparameters:", missing)
-    print("Ensure these exist in parameters.json (exact names) or pass them via CLI.")
+    print("[FATAL] Missing hyperparameters (after merge):", missing)
+    print("Ensure they exist in the block manifest or are passed via CLI/run params.")
     sys.exit(2)
 
+# Clamp fraction defensively
 if HP["fine_tune_fraction"] <= 0 or HP["fine_tune_fraction"] > 1.0:
     print(
         f"[WARN] fine_tune_fraction={HP['fine_tune_fraction']} out of range, clamping to [0.1,1.0]"
     )
     HP["fine_tune_fraction"] = float(np.clip(HP["fine_tune_fraction"], 0.1, 1.0))
 
-print("[HP] Effective hyperparameters:", HP)
+print("[HP] Effective hyperparameters:", json.dumps(HP, indent=2, sort_keys=True))
 
 # -------------------- Constants --------------------
 IMG_H, IMG_W, C = 96, 96, 3
@@ -195,7 +238,7 @@ print(f"[FT] x_train (raw): {x_train.shape}, x_val (raw): {x_val.shape}")
 print(f"[FT] y_train (raw): {y_train.shape}, y_val (raw): {y_val.shape}")
 
 
-# Ensure NHWC float32
+# -------------------- DEBUG / SANITY CHECKS --------------------
 def to_nhwc(x: np.ndarray, name: str) -> np.ndarray:
     if x.ndim == 2:
         if x.shape[1] != EXPECTED_FEAT_LEN:
@@ -213,7 +256,7 @@ def to_nhwc(x: np.ndarray, name: str) -> np.ndarray:
 x_train = to_nhwc(x_train, "x_train")
 x_val = to_nhwc(x_val, "x_val")
 
-# -------------------- Label-space checks BEFORE argmax --------------------
+# Label-space checks BEFORE argmax
 if y_train.ndim == 2 and y_val.ndim == 2:
     if y_train.shape[1] != y_val.shape[1]:
         raise ValueError(
@@ -229,7 +272,7 @@ else:
         f"[FT][FATAL] Inconsistent label dims: train={y_train.ndim}D, val={y_val.ndim}D"
     )
 
-# Optional: shift if both sets look 1-indexed
+# Optional 1-indexed shift
 if y_train.min() == 1 and y_val.min() == 1:
     print("[FT] Shifting labels 1-indexed → 0-indexed.")
     y_train -= 1
@@ -243,6 +286,17 @@ if (y_train.max() >= NUM_CLASSES) or (y_val.max() >= NUM_CLASSES):
         f"[FT][FATAL] Class index out of range w.r.t NUM_CLASSES={NUM_CLASSES}"
     )
 
+# Quick label distribution debug
+ytrain_idx = y_train.astype(int)
+yval_idx = y_val.astype(int)
+uniq_tr, cnt_tr = np.unique(ytrain_idx, return_counts=True)
+uniq_vl, cnt_vl = np.unique(yval_idx, return_counts=True)
+print("[FT][DBG] Unique train labels:", uniq_tr[:30])
+print("[FT][DBG] Train counts head   :", cnt_tr[:30])
+print("[FT][DBG] Unique val labels  :", uniq_vl[:30])
+print("[FT][DBG] Val counts head    :", cnt_vl[:30])
+print(f"[FT] INPUT_SHAPE={INPUT_SHAPE}, NUM_CLASSES={NUM_CLASSES}")
+
 # Class weights (optional)
 class_weight = None
 if HP["use_class_weights"]:
@@ -252,8 +306,6 @@ if HP["use_class_weights"]:
     print(f"[FT] Class counts (first 20): {counts[:20]}")
 else:
     print("[FT] Class weights disabled.")
-
-print(f"[FT] INPUT_SHAPE={INPUT_SHAPE}, NUM_CLASSES={NUM_CLASSES}")
 
 # -------------------- Scaling diagnostic and layer --------------------
 print("[DBG] x_train min/max:", float(x_train.min()), float(x_train.max()))
@@ -267,10 +319,10 @@ else:  # likely 0..1
 
 # -------------------- Augmentation by strength --------------------
 def make_augment(strength: str) -> keras.Sequential:
-    strength = (strength or "medium").lower()
-    if strength == "off":
+    s = (strength or "medium").lower()
+    if s == "off":
         return keras.Sequential([], name="augment_off")
-    if strength == "light":
+    if s == "light":
         return keras.Sequential(
             [
                 layers.RandomFlip("horizontal"),
@@ -279,7 +331,7 @@ def make_augment(strength: str) -> keras.Sequential:
             ],
             name="augment_light",
         )
-    if strength == "strong":
+    if s == "strong":
         return keras.Sequential(
             [
                 layers.RandomFlip("horizontal"),
@@ -315,7 +367,7 @@ def to_one_hot(y):
 def make_ds(x, y, training=True):
     ds = tf.data.Dataset.from_tensor_slices((x, y))
     if training:
-        ds = ds.shuffle(2048, reshuffle_each_iteration=True)
+        ds = ds.shuffle(8 * HP["batch_size"], reshuffle_each_iteration=True)
     ds = ds.map(
         lambda xi, yi: (xi, to_one_hot(yi)), num_parallel_calls=tf.data.AUTOTUNE
     )
@@ -328,7 +380,7 @@ val_ds = make_ds(x_val, y_val, training=False)
 
 # -------------------- Model --------------------
 inputs = layers.Input(shape=INPUT_SHAPE, name="image_input")
-x = augment(inputs)  # active only in training
+x = augment(inputs)  # augmentation is active during training
 x = rescale_layer(x)  # -> [-1, 1] for MobileNetV2
 
 # Prefer local 96x96 MobileNetV2 weights if present; else "imagenet"
@@ -346,16 +398,19 @@ else:
     )
     print("[FT] Using ImageNet MobileNetV2 weights")
 
-# Warmup: backbone frozen
+# Warmup: backbone frozen, BN in inference mode
 base.trainable = False
 x = base(x, training=False)
+# --- head (NO L2 on Dense; AdamW will handle weight decay if enabled) ---
 x = layers.GlobalAveragePooling2D(name="gap")(x)
 x = layers.Dropout(0.3, name="dropout")(x)
 outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
 model = keras.Model(inputs, outputs)
 
 # Loss & metrics
-loss = keras.losses.CategoricalCrossentropy(label_smoothing=HP["label_smoothing"])
+loss = keras.losses.CategoricalCrossentropy(
+    label_smoothing=(HP["label_smoothing"] or 0.0)
+)
 metrics = [
     keras.metrics.CategoricalAccuracy(name="acc"),
     keras.metrics.TopKCategoricalAccuracy(k=5, name="top5"),
@@ -365,9 +420,23 @@ metrics = [
 print(
     f"[FT] Warmup {HP['warmup_epochs']} epochs @ lr={HP['learning_rate']} (backbone frozen)"
 )
-model.compile(
-    optimizer=keras.optimizers.Adam(HP["learning_rate"]), loss=loss, metrics=metrics
-)
+# Use AdamW if weight_decay > 0 and available; else Adam
+use_adamw = HP["weight_decay"] is not None and HP["weight_decay"] > 0.0
+if use_adamw:
+    try:
+        optimizer = keras.optimizers.AdamW(
+            learning_rate=HP["learning_rate"], weight_decay=HP["weight_decay"]
+        )
+        print("[FT] Optimizer: AdamW (warmup)")
+    except Exception:
+        optimizer = keras.optimizers.Adam(learning_rate=HP["learning_rate"])
+        use_adamw = False
+        print("[FT] Optimizer: Adam (AdamW not available)")
+else:
+    optimizer = keras.optimizers.Adam(learning_rate=HP["learning_rate"])
+    print("[FT] Optimizer: Adam (weight_decay<=0)")
+
+model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
 
 es = EarlyStopping(
     monitor="val_loss",
@@ -377,7 +446,7 @@ es = EarlyStopping(
 )
 
 callbacks = []
-if HP["early_stopping_patience"] > 0:
+if HP["early_stopping_patience"] and HP["early_stopping_patience"] > 0:
     callbacks.append(es)
 
 hist_warm = model.fit(
@@ -389,16 +458,28 @@ hist_warm = model.fit(
     verbose=2,
 )
 
-# -------------------- Phase 2: Finetune (unfreeze fraction) --------------------
-# Unfreeze top fraction of layers; fine_tune_fraction=1.0 => unfreeze all
-n_layers = len(base.layers)
-cutoff = int((1.0 - HP["fine_tune_fraction"]) * n_layers)
-for i, layer in enumerate(base.layers):
-    layer.trainable = i >= cutoff
-print(
-    f"[FT] Unfreezing top {HP['fine_tune_fraction']*100:.1f}% (layers >= {cutoff}/{n_layers})"
-)
 
+# -------------------- Phase 2: Finetune (unfreeze fraction; BN frozen) --------------------
+def set_finetune_trainable_fraction(base_model, fraction: float):
+    n = len(base_model.layers)
+    cutoff = int((1.0 - float(fraction)) * n)
+    for i, layer in enumerate(base_model.layers):
+        if i >= cutoff:
+            # Train conv/etc., but DO NOT train BN
+            layer.trainable = not isinstance(layer, BatchNormalization)
+        else:
+            layer.trainable = False
+    return cutoff, n
+
+
+cutoff, n_layers = set_finetune_trainable_fraction(base, HP["fine_tune_fraction"])
+print(
+    f"[FT] Unfreezing top {HP['fine_tune_fraction']*100:.1f}% (layers >= {cutoff}/{n_layers}); BatchNorms frozen"
+)
+trainable = sum(int(l.trainable) for l in base.layers)
+print(f"[FT] Base trainable layers: {trainable}/{len(base.layers)} (BN frozen)")
+
+# Cosine LR schedule starting at fine_tune_start_lr
 steps_per_epoch = int(np.ceil(len(x_train) / HP["batch_size"]))
 ft_epochs = max(HP["epochs"] - HP["warmup_epochs"], 1)
 decay_steps = steps_per_epoch * ft_epochs
@@ -409,7 +490,20 @@ print(
     f"[FT] Finetune for {ft_epochs} epochs, cosine start LR={HP['fine_tune_start_lr']}, decay_steps={decay_steps}"
 )
 
-model.compile(optimizer=keras.optimizers.Adam(cosine_lr), loss=loss, metrics=metrics)
+if use_adamw:
+    try:
+        ft_opt = keras.optimizers.AdamW(
+            learning_rate=cosine_lr, weight_decay=HP["weight_decay"]
+        )
+        print("[FT] FT Optimizer: AdamW (cosine)")
+    except Exception:
+        ft_opt = keras.optimizers.Adam(learning_rate=cosine_lr)
+        print("[FT] FT Optimizer: Adam (AdamW not available)")
+else:
+    ft_opt = keras.optimizers.Adam(learning_rate=cosine_lr)
+    print("[FT] FT Optimizer: Adam (weight_decay<=0)")
+
+model.compile(optimizer=ft_opt, loss=loss, metrics=metrics)
 
 hist_ft = model.fit(
     train_ds,
