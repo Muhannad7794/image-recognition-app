@@ -1,6 +1,4 @@
 # learning-block/aug/model.py
-# MobileNetV2 (96x96), robust JSON/CLI params, correct scaling, MixUp/CutMix, clean saving.
-
 import os, sys, json, math, argparse
 import numpy as np
 import tensorflow as tf
@@ -22,7 +20,7 @@ p.add_argument(
     "--out-directory", "--out_directory", dest="out_directory", type=str, required=True
 )
 
-# Hyperparams as aliases (match parameters.json underscore names, accept dash forms too)
+# Hyperparams as aliases
 p.add_argument("--epochs", type=int)
 p.add_argument("--learning-rate", "--learning_rate", dest="learning_rate", type=float)
 p.add_argument("--batch-size", "--batch_size", dest="batch_size", type=int)
@@ -49,6 +47,43 @@ p.add_argument(
     dest="early_stopping_min_delta",
     type=float,
 )
+p.add_argument("--optimizer", type=str)  # "adam" | "adamw"
+p.add_argument(
+    "--finetune-optimizer", "--finetune_optimizer", dest="finetune_optimizer", type=str
+)
+
+p.add_argument(
+    "--warmup-learning-rate",
+    "--warmup_learning_rate",
+    dest="warmup_learning_rate",
+    type=float,
+)
+p.add_argument(
+    "--finetune-learning-rate",
+    "--finetune_learning_rate",
+    dest="finetune_learning_rate",
+    type=float,
+)
+
+p.add_argument(
+    "--warmup-weight-decay",
+    "--warmup_weight_decay",
+    dest="warmup_weight_decay",
+    type=float,
+)
+p.add_argument(
+    "--finetune-weight-decay",
+    "--finetune_weight_decay",
+    dest="finetune_weight_decay",
+    type=float,
+)
+
+p.add_argument(
+    "--finetune-unfreeze-pct",
+    "--finetune_unfreeze_pct",
+    dest="finetune_unfreeze_pct",
+    type=float,
+)
 
 args, _ = p.parse_known_args()
 print("[DBG] sys.argv =", sys.argv)
@@ -61,7 +96,7 @@ BLOCK_PARAMS = os.path.join(
 )  # repo manifest (learning-block-*/parameters.json)
 
 
-# -------------------- Load parameters.json (source of truth) --------------------
+# -------------------- Load parameters.json --------------------
 def load_json_safe(p):
     try:
         if os.path.exists(p):
@@ -72,9 +107,9 @@ def load_json_safe(p):
     return {}
 
 
-# 1) what EI passed for this run
+# 1) EI-provided run parameters (overrides)
 run_cfg = load_json_safe(RUN_PARAMS)
-# 2) your block's manifest defaults (complete list of args & their defaultValue)
+# 2) Block manifest parameters (defaults)
 repo_cfg = load_json_safe(BLOCK_PARAMS)
 
 
@@ -88,7 +123,7 @@ def extract_manifest_defaults(manifest: dict) -> dict:
             if not name:
                 continue
             dv = a.get("defaultValue", None)
-            # normalize kebab→underscore for names to match your code
+            # normalize kebab→underscore for names to match the code
             out[name.replace("-", "_")] = dv
     except Exception as e:
         print(f"[CFG][WARN] Could not extract defaults from manifest: {e}")
@@ -105,7 +140,7 @@ def norm_keys(d):
 
 run_cfg = norm_keys(run_cfg)
 
-# CLI overrides (already normalized by how you named dest=)
+# CLI overrides
 cli_cfg = {}
 for k in [
     "epochs",
@@ -122,6 +157,13 @@ for k in [
     "early_stopping_min_delta",
     "fine_tune_start_lr",
     "fine_tune_fraction",
+    "optimizer",
+    "finetune_optimizer",
+    "warmup_learning_rate",
+    "finetune_learning_rate",
+    "warmup_weight_decay",
+    "finetune_weight_decay",
+    "finetune_unfreeze_pct",
 ]:
     v = getattr(args, k, None)
     if v is not None:
@@ -135,16 +177,7 @@ print("[CFG] run  params  :", json.dumps(run_cfg, indent=2, sort_keys=True))
 print("[CFG] using        :", json.dumps(cfg, indent=2, sort_keys=True))
 
 
-def _to_bool(v):
-    if isinstance(v, bool):
-        return v
-    if isinstance(v, (int, float)):
-        return bool(v)
-    if isinstance(v, str):
-        return v.strip().lower() in {"1", "true", "yes", "y", "t"}
-    return False
-
-
+# -----------Args formatting --------------------
 def pick(name, default=None):
     # prefer JSON (cfg), fallback to CLI (args), else default
     v = cfg.get(name, None)
@@ -184,9 +217,18 @@ HP = {
     "cutmix_alpha": as_float(cfg.get("cutmix_alpha")),
     "early_stopping_patience": as_int(cfg.get("early_stopping_patience")),
     "early_stopping_min_delta": as_float(cfg.get("early_stopping_min_delta")),
-    # finetune-only (safe to ignore in AUG):
-    "fine_tune_start_lr": as_float(cfg.get("fine_tune_start_lr")),
-    "fine_tune_fraction": as_float(cfg.get("fine_tune_fraction")),
+    "optimizer": (cfg.get("optimizer") or "adam"),
+    "finetune_optimizer": (
+        cfg.get("finetune_optimizer") or cfg.get("optimizer") or "adam"
+    ),
+    "warmup_learning_rate": as_float(cfg.get("warmup_learning_rate"))
+    or as_float(cfg.get("learning_rate")),
+    "finetune_learning_rate": as_float(cfg.get("finetune_learning_rate"))
+    or as_float(cfg.get("learning_rate")),
+    "warmup_weight_decay": as_float(cfg.get("warmup_weight_decay")),
+    "finetune_weight_decay": as_float(cfg.get("finetune_weight_decay")),
+    "finetune_unfreeze_pct": as_float(cfg.get("finetune_unfreeze_pct"))
+    or as_float(cfg.get("unfreeze_pct")),
 }
 
 # Required args:
@@ -239,7 +281,7 @@ print(
     f"[AUG] Val   X: {os.path.basename(x_val_path)}   | Val   y: {os.path.basename(y_val_path)}"
 )
 
-# -------------------- Load arrays --------------------
+# -------------------- Set train/val data --------------------
 x_train = np.load(x_train_path)
 y_train = np.load(y_train_path)
 x_val = np.load(x_val_path)
@@ -254,7 +296,7 @@ d = args.data_directory
 
 print("[DEBUG] Listing data-dir files (first 50):", sorted(os.listdir(d))[:50])
 
-# Quick parse of common metadata files the EI split usually creates
+# Parsing of EI meatadata
 for f in ("sample_id_details.json", "split_metadata.json", "dsp_metadata.json"):
     p = os.path.join(d, f)
     if os.path.exists(p):
@@ -289,7 +331,7 @@ print(
     getattr(y_val, "shape", None),
 )
 
-# Convert to integer labels (this mirrors your code's argmax behavior)
+# Convert to integer labels
 if y_train.ndim == 2:
     ytrain_idx = y_train.argmax(axis=1)
     yval_idx = y_val.argmax(axis=1)
@@ -318,7 +360,7 @@ print("[DEBUG] x_val   rows:", x_val.shape[0], "y_val   rows:", yval_idx.shape[0
 print("[DEBUG] train label head (first 20):", ytrain_idx[:20])
 print("[DEBUG] val   label head (first 20):", yval_idx[:20])
 
-# If sample_id_details.json exists, verify correspondence (common EI field name = 'sample_id' or similar)
+# If sample_id_details.json exists, verify correspondence
 sid_path = os.path.join(d, "sample_id_details.json")
 if os.path.exists(sid_path):
     try:
@@ -403,7 +445,7 @@ if (y_train.max() >= NUM_CLASSES) or (y_val.max() >= NUM_CLASSES):
         f"[AUG][FATAL] Class index out of range w.r.t NUM_CLASSES={NUM_CLASSES}"
     )
 
-# Class weights (optional)
+# Class weights
 class_weight = None
 if HP["use_class_weights"]:
     counts = np.bincount(y_train.astype(int), minlength=NUM_CLASSES)
@@ -443,6 +485,19 @@ def make_ds(x, y, training=True):
 
 train_ds = make_ds(x_train, y_train, training=True)
 val_ds = make_ds(x_val, y_val, training=False)
+
+
+def make_optimizer(name: str, lr: float, wd: float | None):
+    name = (name or "adam").strip().lower()
+    wd = float(wd) if (wd is not None) else 0.0
+    if name == "adamw" and wd > 0.0:
+        try:
+            return keras.optimizers.AdamW(learning_rate=lr, weight_decay=wd)
+        except Exception:
+            print("[AUG][WARN] AdamW not available; falling back to Adam.")
+            return keras.optimizers.Adam(learning_rate=lr)
+    # Default: Adam (tutorial-style baseline)
+    return keras.optimizers.Adam(learning_rate=lr)
 
 
 # -------------------- Optional MixUp/CutMix (fine-tune only) --------------------
@@ -552,9 +607,10 @@ else:
 
 base.trainable = False
 x = base(x, training=False)
-# --- head (no L2 on the Dense when using AdamW) ---
+# --- Add classification head ---
 x = layers.GlobalAveragePooling2D(name="gap")(x)
 x = layers.Dropout(0.3, name="dropout")(x)
+# ----- Add prediction layer -----
 outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
 model = keras.Model(inputs, outputs)
 
@@ -566,15 +622,16 @@ metrics = [
 ]
 
 # -------------------- Phase 1: Warmup (frozen backbone) --------------------
-print(f"[AUG] Warmup {HP['warmup_epochs']} epochs @ lr={HP['learning_rate']}")
-try:
-    optimizer = keras.optimizers.AdamW(
-        learning_rate=HP["learning_rate"], weight_decay=HP["weight_decay"]
-    )
-    print("[AUG] Optimizer: AdamW")
-except Exception:
-    optimizer = keras.optimizers.Adam(learning_rate=HP["learning_rate"])
-    print("[AUG] Optimizer: Adam (AdamW not available)")
+print(
+    f"[AUG] Warmup {HP['warmup_epochs']} epochs @ lr={HP['warmup_learning_rate']} "
+    f"(opt={HP['optimizer']}, wd={HP['warmup_weight_decay']})"
+)
+
+optimizer = make_optimizer(
+    HP["optimizer"],
+    HP["warmup_learning_rate"],
+    HP["warmup_weight_decay"],
+)
 
 model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
 
@@ -606,18 +663,26 @@ print(f"[DBG] Warmup VAL: {dict(zip(model.metrics_names, eval_warm_val))}")
 print(f"[DBG] Warmup TR : {dict(zip(model.metrics_names, eval_warm_tr))}")
 
 
-# -------------------- Phase 2: Fine-tune (respect JSON; freeze BN) --------------------
-cutoff, n_layers = set_finetune_trainable(base, HP["unfreeze_pct"])
+# -------------------- Phase 2: Fine-tune --------------------
+cutoff, n_layers = set_finetune_trainable(base, HP["finetune_unfreeze_pct"])
 print(
-    f"[AUG] Unfreezing top {HP['unfreeze_pct']*100:.1f}% (layers >= {cutoff}/{n_layers}); BatchNorms frozen"
+    f"[AUG] Unfreezing top {HP['finetune_unfreeze_pct']*100:.1f}% "
+    f"(layers >= {cutoff}/{n_layers}); BatchNorms frozen"
 )
-trainable = sum(int(l.trainable) for l in base.layers)
-print(f"[AUG] Base trainable layers: {trainable}/{len(base.layers)} (BN frozen)")
 
-ft_opt = keras.optimizers.AdamW(
-    learning_rate=HP["learning_rate"], weight_decay=HP["weight_decay"]  # JSON-driven
+ft_opt = make_optimizer(
+    HP["finetune_optimizer"],
+    HP["finetune_learning_rate"],
+    (
+        HP["finetune_weight_decay"]
+        if HP["finetune_weight_decay"] is not None
+        else HP["weight_decay"]
+    ),
 )
-print("[AUG] FT Optimizer: AdamW")
+print(
+    f"[AUG] FT Optimizer: {HP['finetune_optimizer']} "
+    f"(lr={HP['finetune_learning_rate']}, wd={HP['finetune_weight_decay'] if HP['finetune_weight_decay'] is not None else HP['weight_decay']})"
+)
 
 model.compile(optimizer=ft_opt, loss=loss, metrics=metrics)
 
