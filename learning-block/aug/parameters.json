@@ -98,6 +98,15 @@
                 "category": "training"
             },
             {
+                "name": "weight_decay",
+                "type": "float",
+                "label": "fallback weight decay",
+                "defaultValue": 0.0,
+                "minimum": 0.0,
+                "maximum": 0.0,
+                "category": "training"
+            },
+            {
                 "name": "finetune_weight_decay",
                 "type": "float",
                 "label": "Fine-tune weight decay",
