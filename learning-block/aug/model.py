@@ -539,15 +539,19 @@ else:
     print("[AUG] Using ImageNet MobileNetV2 weights")
 
 base.trainable = False  # warmup: frozen
-x = base(x)
-x = layers.GlobalAveragePooling2D(name="gap")(x)
-x = layers.Dropout(0.3, name="dropout")(x)
-outputs = layers.Dense(
-    NUM_CLASSES,
-    activation="softmax",
-    kernel_regularizer=keras.regularizers.l2(HP["weight_decay"]),
-    name="predictions",
-)(x)
+# Pass 'training=False' so BatchNormalization layers run in inference mode
+x = base(x, training=False)
+
+# This is the new head, based on the 36%-accurate EI default model.
+# It PRESERVES the 3x3 spatial data by reshaping/flattening it.
+x = layers.Reshape((-1, x.shape[3]), name="reshape_features")(x)  # (None, 9, 1280)
+x = layers.Dense(16, activation="relu", name="bottleneck_dense")(x)
+x = layers.Dropout(0.1, name="bottleneck_dropout")(x)
+x = layers.Flatten(name="flatten_bottleneck")(x)
+
+# Your loss function already expects 'softmax', so this is correct.
+outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
+
 model = keras.Model(inputs, outputs)
 
 # Loss & metrics
