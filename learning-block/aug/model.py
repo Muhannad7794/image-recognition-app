@@ -373,21 +373,12 @@ def to_nhwc(x: np.ndarray, name: str) -> np.ndarray:
 x_train = to_nhwc(x_train, "x_train")
 x_val = to_nhwc(x_val, "x_val")
 
-# -------------------- Label-space checks BEFORE argmax --------------------
-if y_train.ndim == 2 and y_val.ndim == 2:
-    if y_train.shape[1] != y_val.shape[1]:
-        raise ValueError(
-            f"[AUG][FATAL] Label-space mismatch: train width={y_train.shape[1]} vs val width={y_val.shape[1]}"
-        )
-    NUM_CLASSES = int(y_train.shape[1])
+# -------------------- Label handling (convert to sparse FIRST) --------------------
+# Convert any one-hot labels to integer indices *before* deciding NUM_CLASSES
+if y_train.ndim == 2:
     y_train = y_train.argmax(axis=1)
+if y_val.ndim == 2:
     y_val = y_val.argmax(axis=1)
-elif y_train.ndim == 1 and y_val.ndim == 1:
-    NUM_CLASSES = int(max(y_train.max(), y_val.max()) + 1)
-else:
-    raise ValueError(
-        f"[AUG][FATAL] Inconsistent label dims: train={y_train.ndim}D, val={y_val.ndim}D"
-    )
 
 # Optional 1-indexed shift
 if y_train.min() == 1 and y_val.min() == 1:
@@ -395,13 +386,26 @@ if y_train.min() == 1 and y_val.min() == 1:
     y_train -= 1
     y_val -= 1
 
-# Range sanity
+# Basic sanity
+if (y_train.ndim != 1) or (y_val.ndim != 1):
+    raise ValueError(
+        f"[AUG][FATAL] Labels must be 1D after conversion: "
+        f"train={y_train.ndim}D, val={y_val.ndim}D"
+    )
 if (y_train.min() < 0) or (y_val.min() < 0):
     raise ValueError("[AUG][FATAL] Negative class index found.")
+
+# NUM_CLASSES must match the max class index present in this split
+NUM_CLASSES = int(max(y_train.max(), y_val.max()) + 1)
+
+# Range sanity (now that NUM_CLASSES is decided)
 if (y_train.max() >= NUM_CLASSES) or (y_val.max() >= NUM_CLASSES):
     raise ValueError(
         f"[AUG][FATAL] Class index out of range w.r.t NUM_CLASSES={NUM_CLASSES}"
     )
+
+print(f"[AUG] Derived NUM_CLASSES from labels present: {NUM_CLASSES}")
+
 
 # Class weights (optional)
 class_weight = None
@@ -425,18 +429,12 @@ else:  # likely 0..1
     print("[DBG] Using Rescaling(2.0, offset=-1.0) for 0..1 inputs")
 
 
-# -------------------- tf.data pipeline (one-hot inside) --------------------
-def to_one_hot(y):
-    return tf.one_hot(tf.cast(y, tf.int32), NUM_CLASSES)
-
 
 def make_ds(x, y, training=True):
     ds = tf.data.Dataset.from_tensor_slices((x, y))
     if training:
         ds = ds.shuffle(8 * HP["batch_size"], reshuffle_each_iteration=True)
-    ds = ds.map(
-        lambda xi, yi: (xi, to_one_hot(yi)), num_parallel_calls=tf.data.AUTOTUNE
-    )
+    # IMPORTANT: no one-hot here; keep labels as int
     ds = ds.batch(HP["batch_size"]).prefetch(tf.data.AUTOTUNE)
     return ds
 
@@ -559,10 +557,10 @@ outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
 model = keras.Model(inputs, outputs)
 
 # Loss & metrics
-loss = keras.losses.CategoricalCrossentropy(label_smoothing=HP["label_smoothing"])
+loss = keras.losses.SparseCategoricalCrossentropy(label_smoothing=HP["label_smoothing"])
 metrics = [
-    keras.metrics.CategoricalAccuracy(name="acc"),
-    keras.metrics.TopKCategoricalAccuracy(k=5, name="top5"),
+    keras.metrics.SparseCategoricalAccuracy(name="acc"),
+    keras.metrics.SparseTopKCategoricalAccuracy(k=5, name="top5"),
 ]
 
 # -------------------- Phase 1: Warmup (frozen backbone) --------------------
