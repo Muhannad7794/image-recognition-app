@@ -75,6 +75,7 @@ def load_json_safe(path):
         print(f"[CFG][WARN] Could not parse {path}: {e}")
     return {}
 
+
 # 1) EI-provided run parameters (overrides)
 run_cfg_raw = load_json_safe(RUN_PARAMS)
 # 2) Block manifest parameters (defaults)
@@ -379,6 +380,19 @@ def make_ds(x, y, training=True):
 train_ds = make_ds(x_train, y_train, training=True)
 val_ds = make_ds(x_val, y_val, training=False)
 
+
+def set_finetune_trainable_fraction(base_model, fraction: float):
+    n = len(base_model.layers)
+    cutoff = int((1.0 - float(fraction)) * n)
+    for i, layer in enumerate(base_model.layers):
+        if i >= cutoff:
+            # Train conv/etc., but DO NOT train BN
+            layer.trainable = not isinstance(layer, BatchNormalization)
+        else:
+            layer.trainable = False
+    return cutoff, n
+
+
 # -------------------- Model --------------------
 inputs = layers.Input(shape=INPUT_SHAPE, name="image_input")
 x = augment(inputs)  # augmentation is active during training
@@ -467,24 +481,13 @@ print(f"[DBG] Warmup TR : {dict(zip(model.metrics_names, eval_warm_tr))}")
 
 
 # -------------------- Phase 2: Finetune (unfreeze fraction; BN frozen) --------------------
-def set_finetune_trainable_fraction(base_model, fraction: float):
-    n = len(base_model.layers)
-    cutoff = int((1.0 - float(fraction)) * n)
-    for i, layer in enumerate(base_model.layers):
-        if i >= cutoff:
-            # Train conv/etc., but DO NOT train BN
-            layer.trainable = not isinstance(layer, BatchNormalization)
-        else:
-            layer.trainable = False
-    return cutoff, n
-
+# Allow per-layer flags to take effect in Phase-2
+base.trainable = True
 
 cutoff, n_layers = set_finetune_trainable_fraction(base, HP["fine_tune_fraction"])
 print(
     f"[FT] Unfreezing top {HP['fine_tune_fraction']*100:.1f}% (layers >= {cutoff}/{n_layers}); BatchNorms frozen"
 )
-trainable = sum(int(l.trainable) for l in base.layers)
-print(f"[FT] Base trainable layers: {trainable}/{len(base.layers)} (BN frozen)")
 
 # Cosine LR schedule starting at fine_tune_start_lr
 steps_per_epoch = int(np.ceil(len(x_train) / HP["batch_size"]))
@@ -511,6 +514,14 @@ else:
     print("[FT] FT Optimizer: Adam (weight_decay<=0)")
 
 model.compile(optimizer=ft_opt, loss=loss, metrics=metrics)
+# DEBUG: print trainable layers/vars
+print(
+    "FT – trainable base layers:",
+    sum(int(l.trainable) for l in base.layers),
+    "/",
+    len(base.layers),
+)
+print("FT – trainable base vars:", sum(int(v.trainable) for v in base.variables))
 
 hist_ft = model.fit(
     train_ds,

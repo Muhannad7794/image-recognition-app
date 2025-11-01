@@ -97,13 +97,35 @@ def generate_features(
 ) -> Dict[str, Any]:
 
     # ---- Output size & channels (contract to model) ----
-    Wt = _as_int("img_width", kwargs.get("img-width", 160))
-    Ht = _as_int("img_height", kwargs.get("img-height", 160))
+    # accept both snake_case and kebab-case keys
+    Wt = _as_int("img_width", kwargs.get("img_width", kwargs.get("img-width", 160)))
+    Ht = _as_int("img_height", kwargs.get("img_height", kwargs.get("img-height", 160)))
     Cout = 3 if int(kwargs.get("out_channels", 3)) == 3 else 1  # sanitize {1,3}
 
     # ---- Flatten incoming buffer ----
     flat = np.asarray(raw_data).reshape(-1)
     N = int(flat.size)
+
+    # ---- NEW: Detect and unpack packed 24-bit RGB (0xRRGGBB per pixel) ----
+    # Only do this if we are not already clearly 3-channel bytes (N % 3 == 0) and values look like big ints.
+    if N > 0 and (N % 3 != 0):
+        try:
+            mx = float(np.nanmax(flat))
+            mn = float(np.nanmin(flat))
+        except Exception:
+            mx = 0.0
+            mn = 0.0
+
+        # Heuristics: non-negative, reasonably large integers (typical for 0xRRGGBB),
+        # and not already tiny byte-like values.
+        if mn >= 0.0 and mx > 4096 and mx <= 0xFFFFFF and np.all(np.mod(flat, 1) == 0):
+            u = flat.astype(np.uint32)
+            r = ((u >> 16) & 0xFF).astype(np.float32)
+            g = ((u >> 8) & 0xFF).astype(np.float32)
+            b = (u & 0xFF).astype(np.float32)
+            # Expand packed ints to interleaved RGB bytes
+            flat = np.stack([r, g, b], axis=1).reshape(-1)
+            N = int(flat.size)
 
     # ---- Input channels (robust) ----
     Cin_pref = kwargs.get("channels") or kwargs.get("input_channels")

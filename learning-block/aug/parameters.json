@@ -49,7 +49,7 @@
                 "name": "learning_rate",
                 "type": "float",
                 "label": "Base learning rate",
-                "defaultValue": 0.001,
+                "defaultValue": 0.0001,
                 "minimum": 0.0001,
                 "maximum": 0.1,
                 "category": "training"
@@ -58,7 +58,7 @@
                 "name": "warmup_learning_rate",
                 "type": "float",
                 "label": "Warmup learning rate",
-                "defaultValue": 0.001,
+                "defaultValue": 0.0001,
                 "minimum": 0.0001,
                 "maximum": 0.1,
                 "category": "training"
@@ -68,7 +68,7 @@
                 "type": "float",
                 "label": "Fine-tune learning rate",
                 "defaultValue": 0.00001,
-                "minimum": 0.00001,
+                "minimum": 0.000001,
                 "maximum": 0.1,
                 "category": "training"
             },
