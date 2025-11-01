@@ -602,7 +602,7 @@ else:
     print("[AUG] Using ImageNet MobileNetV2 weights")
 
 # -----Define model's Head -------
-base.trainable = False
+base.trainable = False # Freeze base model
 x = base(x, training=False)
 x = layers.GlobalAveragePooling2D(name="gap")(x)
 x = layers.Dropout(0.3, name="dropout")(x)
@@ -660,9 +660,8 @@ print(f"[DBG] Warmup VAL: {dict(zip(model.metrics_names, eval_warm_val))}")
 print(f"[DBG] Warmup TR : {dict(zip(model.metrics_names, eval_warm_tr))}")
 
 
-# -------------------- Phase 2: Fine-tune --------------------
-# Allow per-layer flags to take effect in Phase-2
-base.trainable = True
+# -------------------- Phase 2: Fine-tune (Unfreeze backbone) --------------------
+base.trainable = True # Unfreeze base model
 
 cutoff, n_layers = set_finetune_trainable(base, HP["finetune_unfreeze_pct"])
 print(

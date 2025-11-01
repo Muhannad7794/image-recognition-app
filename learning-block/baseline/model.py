@@ -10,6 +10,7 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.layers import BatchNormalization
 import numpy as np
 import os
 import json
@@ -70,6 +71,15 @@ y_validate = np.load(y_val_path)
 # --- Ensure NHWC shape and dtype ---
 expected_feat_len = IMG_HEIGHT * IMG_WIDTH * CHANNELS
 
+def set_finetune_trainable(base_model, unfreeze_pct: float):
+    n = len(base_model.layers)
+    cutoff = int((1.0 - float(unfreeze_pct)) * n)
+    for i, layer in enumerate(base_model.layers):
+        if i >= cutoff:
+            layer.trainable = not isinstance(layer, BatchNormalization)
+        else:
+            layer.trainable = False
+    return cutoff, n
 
 def to_nhwc(x):
     if x.ndim == 2:
@@ -114,7 +124,7 @@ print(f"x_train: {x_train.shape}, x_val: {x_validate.shape}")
 print(f"y_train: {y_train.shape}, y_val: {y_validate.shape}, NUM_CLASSES={NUM_CLASSES}")
 
 
-# --- Model Definition ---
+# --- Define Model input ---
 inp = Input(shape=INPUT_SHAPE, name="image_input")
 scaled = Rescaling(scale=2.0, offset=-1.0, name="to_minus1_plus1")(inp)
 
@@ -125,34 +135,68 @@ weights_path = os.path.expanduser(
 base_model = MobileNetV2(
     input_shape=INPUT_SHAPE, include_top=False, weights=weights_path
 )
-base_model.trainable = False
 
+# -----Define model's Head -------
+base_model.trainable = False # Freeze base model
 x = base_model(scaled, training=False)
 x = GlobalAveragePooling2D(name="gap")(x)
 x = Dropout(0.5, name="dropout")(x)
+
+# -----Define model's outputs ------
 predictions = Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
 model = Model(inputs=inp, outputs=predictions)
 
-# --- Compile Model ---
+# -------------------- Phase 1: Warmup (frozen backbone) --------------------
+# Optimizer
 optimizer = Adam(learning_rate=args.learning_rate)
+# Compile model
 model.compile(
     optimizer=optimizer, loss="sparse_categorical_crossentropy", metrics=["accuracy"]
 )
+# Summary
 model.summary()
 
-# --- Train Model ---
-print(
-    f"Starting training for {args.epochs} epochs with learning rate {args.learning_rate}..."
-)
+
 history = model.fit(
     x_train,
     y_train,
     epochs=args.epochs,
     validation_data=(x_validate, y_validate),
-    batch_size=32,
+    batch_size=64,
     verbose=2,
 )
-print("Training finished.")
+
+# DEBUG: print evaluate to confirm the head can separate and learn
+eval_warm_val = model.evaluate(x_validate, verbose=0)
+eval_warm_tr = model.evaluate(x_train, verbose=0)
+print(f"[DBG] Warmup VAL: {dict(zip(model.metrics_names, eval_warm_val))}")
+print(f"[DBG] Warmup TR : {dict(zip(model.metrics_names, eval_warm_tr))}")
+
+# -------------------- Phase 2: Fine-tune (Unfreeze backbone) --------------------
+base_model.trainable = True # Unfreeze the backbone
+
+cutoff, n_layers = set_finetune_trainable(base_model, unfreeze_pct=0.75)
+print(f"Unfroze {n_layers - cutoff}/{n_layers} layers of the backbone for fine-tuning.")
+
+# optimizer
+optimizer_finetune = Adam(learning_rate=args.learning_rate / 10.0)
+# re-compile
+model.compile(
+    optimizer=optimizer_finetune, loss="sparse_categorical_crossentropy", metrics=["accuracy"]
+)
+# summary   
+model.summary()
+
+# continue training
+history_finetune = model.fit(
+    x_train,
+    y_train,
+    epochs=args.epochs + 20,
+    initial_epoch=args.epochs,
+    validation_data=(x_validate, y_validate),
+    batch_size=64,
+    verbose=2,
+)
 
 # --- Save Model (SavedModel + TFLite) ---
 model_save_path = os.path.join(args.out_directory, "saved_model")

@@ -128,7 +128,7 @@
                 "name": "finetune_unfreeze_pct",
                 "type": "float",
                 "label": "Fine-tune unfreeze percentage (0-1)",
-                "defaultValue": 0.50,
+                "defaultValue": 0.75,
                 "minimum": 0.0,
                 "maximum": 1.0,
                 "category": "training"
