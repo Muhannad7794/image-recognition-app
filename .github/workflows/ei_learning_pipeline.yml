@@ -1,11 +1,12 @@
 # .github/workflows/ei_training_pipeline.yml
-name: Push Edge Impulse Learning Blocks
+name: Push EI Learning Blocks
 
 on:
   push:
     branches: [ learn, master, edit ]
     paths:
       - 'learning-block/**'
+  workflow_dispatch:
 
 jobs:
   push-blocks:

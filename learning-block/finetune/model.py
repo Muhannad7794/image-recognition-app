@@ -8,7 +8,9 @@ from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import BatchNormalization
 
 # -------------------- Argparse (aliases for underscore/dash) --------------------
-p = argparse.ArgumentParser(description="Fine-tune MobileNetV2 @96x96 (robust loader)")
+p = argparse.ArgumentParser(
+    description="Fine-tune MobileNetV2 @160x160 (robust loader)"
+)
 p.add_argument(
     "--data-directory",
     "--data_directory",
@@ -20,7 +22,7 @@ p.add_argument(
     "--out-directory", "--out_directory", dest="out_directory", type=str, required=True
 )
 
-# Hyperparams (accept dash & underscore; names align with parameters.json)
+# -------------------- Argparse (aliases for dash/underscore) --------------------
 p.add_argument("--epochs", type=int)
 p.add_argument("--learning-rate", "--learning_rate", dest="learning_rate", type=float)
 p.add_argument("--warmup-epochs", "--warmup_epochs", dest="warmup_epochs", type=int)
@@ -52,14 +54,12 @@ p.add_argument(
 p.add_argument(
     "--augment-strength", "--augment_strength", dest="augment_strength", type=str
 )
-
-# (Optional) allow AdamW via JSON if present; safe if absent
 p.add_argument("--weight-decay", "--weight_decay", dest="weight_decay", type=float)
 
 args, _ = p.parse_known_args()
 print("[DBG] sys.argv =", sys.argv)
 
-# -------------------- Load parameters.json (source of truth) --------------------
+# -------------------- Load params from parameters.json --------------------
 RUN_PARAMS = os.path.join(
     args.data_directory, "parameters.json"
 )  # /home/parameters.json
@@ -75,8 +75,9 @@ def load_json_safe(path):
         print(f"[CFG][WARN] Could not parse {path}: {e}")
     return {}
 
-
+# 1) EI-provided run parameters (overrides)
 run_cfg_raw = load_json_safe(RUN_PARAMS)
+# 2) Block manifest parameters (defaults)
 repo_cfg_raw = load_json_safe(BLOCK_PARAMS)
 
 
@@ -104,7 +105,7 @@ def norm_keys(d):  # kebab->underscore once
 
 run_cfg = norm_keys(run_cfg_raw)
 
-# CLI overrides (already normalized by dest=)
+# CLI overrides
 cli_cfg = {}
 for k in [
     "epochs",
@@ -195,7 +196,7 @@ if HP["fine_tune_fraction"] <= 0 or HP["fine_tune_fraction"] > 1.0:
 print("[HP] Effective hyperparameters:", json.dumps(HP, indent=2, sort_keys=True))
 
 # -------------------- Constants --------------------
-IMG_H, IMG_W, C = 96, 96, 3
+IMG_H, IMG_W, C = 160, 160, 3
 INPUT_SHAPE = (IMG_H, IMG_W, C)
 EXPECTED_FEAT_LEN = IMG_H * IMG_W * C
 
@@ -309,10 +310,10 @@ else:
 
 # -------------------- Scaling diagnostic and layer --------------------
 print("[DBG] x_train min/max:", float(x_train.min()), float(x_train.max()))
-if float(x_train.max()) > 1.5:  # likely 0..255
+if float(x_train.max()) > 1.5:
     rescale_layer = layers.Rescaling(1.0 / 127.5, offset=-1.0)  # -> [-1,1]
     print("[DBG] Using Rescaling(1/127.5, offset=-1.0) for 0..255 inputs")
-else:  # likely 0..1
+else:
     rescale_layer = layers.Rescaling(2.0, offset=-1.0)  # -> [-1,1]
     print("[DBG] Using Rescaling(2.0, offset=-1.0) for 0..1 inputs")
 
@@ -383,15 +384,15 @@ inputs = layers.Input(shape=INPUT_SHAPE, name="image_input")
 x = augment(inputs)  # augmentation is active during training
 x = rescale_layer(x)  # -> [-1, 1] for MobileNetV2
 
-# Prefer local 96x96 MobileNetV2 weights if present; else "imagenet"
+# Prefer local 160x160 MobileNetV2 weights if present; else "imagenet"
 weights_path = os.path.expanduser(
-    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5"
+    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_160_no_top.h5"
 )
 if os.path.exists(weights_path):
     base = keras.applications.MobileNetV2(
         input_shape=INPUT_SHAPE, include_top=False, weights=weights_path
     )
-    print("[FT] Using local 96x96 MobileNetV2 weights")
+    print("[FT] Using local 160x160 MobileNetV2 weights")
 else:
     base = keras.applications.MobileNetV2(
         input_shape=INPUT_SHAPE, include_top=False, weights="imagenet"

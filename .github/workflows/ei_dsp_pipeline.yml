@@ -1,11 +1,12 @@
 # .github/workflows/ei_dsp_pipeline.yml
-name: Push Edge Impulse DSP Block
+name: Push EI DSP Block
 
 on:
   push:
     branches:
       - dsp
       - master
+      - edit
     paths: # Only run if files in the DSP block directory change
       - 'dsp-block/**'
   workflow_dispatch: # Allows manual triggering

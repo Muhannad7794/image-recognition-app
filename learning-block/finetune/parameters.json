@@ -2,7 +2,7 @@
     "version": 1,
     "type": "machine-learning",
     "info": {
-        "name": "Model Training Block — Finetune (MobileNetV2 @96×96)",
+        "name": "Finetune Model Training Block",
         "description": "Warmup (frozen) → full finetune with cosine LR, label smoothing, class weights, and moderate data augmentation.",
         "operatesOn": "image",
         "imageInputScaling": "0..1",
@@ -101,7 +101,7 @@
                 "maximum": 20,
                 "category": "regularization"
             },
-                        {
+            {
                 "name": "early_stopping_min_delta",
                 "type": "float",
                 "label": "Early stopping min_delta",

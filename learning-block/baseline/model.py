@@ -26,9 +26,9 @@ parser.add_argument("--out-directory", type=str, required=True)
 args, unknown = parser.parse_known_args()
 
 # --- Define image shape ---
-IMG_HEIGHT = 96
-IMG_WIDTH = 96
-CHANNELS = 3 
+IMG_HEIGHT = 160
+IMG_WIDTH = 160
+CHANNELS = 3
 INPUT_SHAPE = (IMG_HEIGHT, IMG_WIDTH, CHANNELS)
 
 # --- Load Data ---
@@ -118,9 +118,9 @@ print(f"y_train: {y_train.shape}, y_val: {y_validate.shape}, NUM_CLASSES={NUM_CL
 inp = Input(shape=INPUT_SHAPE, name="image_input")
 scaled = Rescaling(scale=2.0, offset=-1.0, name="to_minus1_plus1")(inp)
 
-# Load local 96x96 no-top weights
+# Load local 160x160 no-top weights
 weights_path = os.path.expanduser(
-    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5"
+    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_160_no_top.h5"
 )
 base_model = MobileNetV2(
     input_shape=INPUT_SHAPE, include_top=False, weights=weights_path

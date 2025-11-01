@@ -8,7 +8,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import BatchNormalization
 
 # -------------------- Argparse (aliases for dash/underscore) --------------------
-p = argparse.ArgumentParser(description="AUG MobileNetV2 @96x96 (robust loader)")
+p = argparse.ArgumentParser(description="AUG MobileNetV2 @160x160 (robust loader)")
 p.add_argument(
     "--data-directory",
     "--data_directory",
@@ -19,8 +19,6 @@ p.add_argument(
 p.add_argument(
     "--out-directory", "--out_directory", dest="out_directory", type=str, required=True
 )
-
-# Hyperparams as aliases
 p.add_argument("--epochs", type=int)
 p.add_argument("--learning-rate", "--learning_rate", dest="learning_rate", type=float)
 p.add_argument("--batch-size", "--batch_size", dest="batch_size", type=int)
@@ -51,7 +49,6 @@ p.add_argument("--optimizer", type=str)  # "adam" | "adamw"
 p.add_argument(
     "--finetune-optimizer", "--finetune_optimizer", dest="finetune_optimizer", type=str
 )
-
 p.add_argument(
     "--warmup-learning-rate",
     "--warmup_learning_rate",
@@ -64,7 +61,6 @@ p.add_argument(
     dest="finetune_learning_rate",
     type=float,
 )
-
 p.add_argument(
     "--warmup-weight-decay",
     "--warmup_weight_decay",
@@ -77,7 +73,6 @@ p.add_argument(
     dest="finetune_weight_decay",
     type=float,
 )
-
 p.add_argument(
     "--finetune-unfreeze-pct",
     "--finetune_unfreeze_pct",
@@ -88,6 +83,7 @@ p.add_argument(
 args, _ = p.parse_known_args()
 print("[DBG] sys.argv =", sys.argv)
 
+# -------------------- Load params from parameters.json --------------------
 RUN_PARAMS = os.path.join(
     args.data_directory, "parameters.json"
 )  # /home/parameters.json
@@ -96,7 +92,6 @@ BLOCK_PARAMS = os.path.join(
 )  # repo manifest (learning-block-*/parameters.json)
 
 
-# -------------------- Load parameters.json --------------------
 def load_json_safe(p):
     try:
         if os.path.exists(p):
@@ -248,7 +243,7 @@ if missing:
     sys.exit(2)
 
 # -------------------- Constants --------------------
-IMG_H, IMG_W, C = 96, 96, 3
+IMG_H, IMG_W, C = 160, 160, 3
 INPUT_SHAPE = (IMG_H, IMG_W, C)
 EXPECTED_FEAT_LEN = IMG_H * IMG_W * C
 
@@ -586,31 +581,33 @@ augment = keras.Sequential(
     name="augment",
 )
 
+# -----Define model's inputs -------
 inputs = layers.Input(shape=INPUT_SHAPE, name="image_input")
 x = augment(inputs)
 x = rescale_layer(x)  # dynamic scale -> [-1, 1]
 
-# Prefer local 96x96 MobileNetV2 weights if present; else "imagenet"
+# Prefer local 160x160 MobileNetV2 weights if present; else "imagenet"
 weights_path = os.path.expanduser(
-    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5"
+    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_160_no_top.h5"
 )
 if os.path.exists(weights_path):
     base = keras.applications.MobileNetV2(
         input_shape=INPUT_SHAPE, include_top=False, weights=weights_path
     )
-    print("[AUG] Using local 96x96 MobileNetV2 weights")
+    print("[AUG] Using local 160x160 MobileNetV2 weights")
 else:
     base = keras.applications.MobileNetV2(
         input_shape=INPUT_SHAPE, include_top=False, weights="imagenet"
     )
     print("[AUG] Using ImageNet MobileNetV2 weights")
 
+# -----Define model's Head -------
 base.trainable = False
 x = base(x, training=False)
-# --- Add classification head ---
 x = layers.GlobalAveragePooling2D(name="gap")(x)
 x = layers.Dropout(0.3, name="dropout")(x)
-# ----- Add prediction layer -----
+
+# -----Define model's outputs ------
 outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
 model = keras.Model(inputs, outputs)
 
@@ -626,13 +623,13 @@ print(
     f"[AUG] Warmup {HP['warmup_epochs']} epochs @ lr={HP['warmup_learning_rate']} "
     f"(opt={HP['optimizer']}, wd={HP['warmup_weight_decay']})"
 )
-
+# Optimizer
 optimizer = make_optimizer(
     HP["optimizer"],
     HP["warmup_learning_rate"],
     HP["warmup_weight_decay"],
 )
-
+# Compile model
 model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
 
 es = EarlyStopping(
@@ -664,6 +661,9 @@ print(f"[DBG] Warmup TR : {dict(zip(model.metrics_names, eval_warm_tr))}")
 
 
 # -------------------- Phase 2: Fine-tune --------------------
+# Allow per-layer flags to take effect in Phase-2
+base.trainable = True
+
 cutoff, n_layers = set_finetune_trainable(base, HP["finetune_unfreeze_pct"])
 print(
     f"[AUG] Unfreezing top {HP['finetune_unfreeze_pct']*100:.1f}% "
@@ -685,6 +685,15 @@ print(
 )
 
 model.compile(optimizer=ft_opt, loss=loss, metrics=metrics)
+# DEBUG: print trainable layers/vars
+print(
+    "FT – trainable base layers:",
+    sum(int(l.trainable) for l in base.layers),
+    "/",
+    len(base.layers),
+)
+print("FT – trainable base vars:", sum(int(v.trainable) for v in base.variables))
+
 
 train_ft = with_mixups(make_ds(x_train, y_train, training=True))
 hist_ft = model.fit(
