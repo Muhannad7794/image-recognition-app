@@ -27,7 +27,7 @@
                 "name": "epochs",
                 "type": "int",
                 "label": "Total epochs (warmup + finetune)",
-                "defaultValue": 50,
+                "defaultValue": 60,
                 "minimum": 5,
                 "category": "training"
             },
@@ -44,7 +44,7 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs (backbone frozen)",
-                "defaultValue": 10,
+                "defaultValue": 12,
                 "minimum": 0,
                 "maximum": 30,
                 "category": "training"
@@ -56,6 +56,15 @@
                 "defaultValue": 0.00001,
                 "minimum": 0.000001,
                 "maximum": 0.01,
+                "category": "training"
+            },
+            {
+                "name": "weight_decay",
+                "type": "float",
+                "label": "AdamW weight decay",
+                "defaultValue": 0.00001,
+                "minimum": 0.00001,
+                "maximum": 0.0001,
                 "category": "training"
             },
             {
@@ -71,7 +80,7 @@
                 "name": "batch_size",
                 "type": "int",
                 "label": "Batch size",
-                "defaultValue": 32,
+                "defaultValue": 64,
                 "minimum": 8,
                 "maximum": 256,
                 "category": "resources"
@@ -80,9 +89,9 @@
                 "name": "label_smoothing",
                 "type": "float",
                 "label": "Label smoothing",
-                "defaultValue": 0.01,
-                "minimum": 0.0,
-                "maximum": 0.0,
+                "defaultValue": 0.05,
+                "minimum": 0.01,
+                "maximum": 0.1,
                 "category": "regularization"
             },
             {

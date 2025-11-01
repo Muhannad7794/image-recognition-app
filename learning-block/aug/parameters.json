@@ -27,7 +27,7 @@
                 "name": "epochs",
                 "type": "int",
                 "label": "Number of epochs",
-                "defaultValue": 40,
+                "defaultValue": 60,
                 "minimum": 1,
                 "category": "training"
             },
@@ -76,7 +76,7 @@
                 "name": "batch_size",
                 "type": "int",
                 "label": "Batch size",
-                "defaultValue": 32,
+                "defaultValue": 64,
                 "minimum": 8,
                 "category": "training"
             },
@@ -84,42 +84,42 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs",
-                "defaultValue": 10,
-                "minimum": 0,
+                "defaultValue": 12,
+                "minimum": 1,
                 "category": "training"
             },
             {
                 "name": "warmup_weight_decay",
                 "type": "float",
                 "label": "Warmup weight decay",
-                "defaultValue": 0.0,
-                "minimum": 0.0,
-                "maximum": 0.0,
+                "defaultValue": 0.0001,
+                "minimum": 0.0001,
+                "maximum": 0.001,
                 "category": "training"
             },
             {
                 "name": "finetune_weight_decay",
                 "type": "float",
                 "label": "Fine-tune weight decay",
-                "defaultValue": 0.0,
-                "minimum": 0.0,
-                "maximum": 0.0,
+                "defaultValue": 0.00001,
+                "minimum": 0.00001,
+                "maximum": 0.0001,
                 "category": "training"
             },
             {
                 "name": "weight_decay",
                 "type": "float",
                 "label": "fallback weight decay",
-                "defaultValue": 0.0,
-                "minimum": 0.0,
-                "maximum": 0.0,
+                "defaultValue": 0.00001,
+                "minimum": 0.00001,
+                "maximum": 0.0001,
                 "category": "training"
             },
             {
                 "name": "unfreeze_pct",
                 "type": "float",
                 "label": "Backbone unfreeze percentage (0-1)",
-                "defaultValue": 0.25,
+                "defaultValue": 0.50,
                 "minimum": 0.0,
                 "maximum": 1.0,
                 "category": "training"
@@ -128,7 +128,7 @@
                 "name": "finetune_unfreeze_pct",
                 "type": "float",
                 "label": "Fine-tune unfreeze percentage (0-1)",
-                "defaultValue": 0.25,
+                "defaultValue": 0.50,
                 "minimum": 0.0,
                 "maximum": 1.0,
                 "category": "training"
@@ -137,9 +137,9 @@
                 "name": "label_smoothing",
                 "type": "float",
                 "label": "Label smoothing",
-                "defaultValue": 0.01,
-                "minimum": 0.0,
-                "maximum": 0.0,
+                "defaultValue": 0.05,
+                "minimum": 0.01,
+                "maximum": 0.1,
                 "category": "training"
             },
             {
@@ -153,18 +153,18 @@
                 "name": "mixup_alpha",
                 "type": "float",
                 "label": "MixUp alpha",
-                "defaultValue": 0.0,
-                "minimum": 0.0,
-                "maximum": 0.0,
+                "defaultValue": 0.2,
+                "minimum": 0.1,
+                "maximum": 0.4,
                 "category": "augmentation"
             },
             {
                 "name": "cutmix_alpha",
                 "type": "float",
                 "label": "CutMix alpha",
-                "defaultValue": 0.0,
-                "minimum": 0.0,
-                "maximum": 0.0,
+                "defaultValue": 0.2,
+                "minimum": 0.1,
+                "maximum": 0.3,
                 "category": "augmentation"
             },
             {
