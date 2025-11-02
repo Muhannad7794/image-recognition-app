@@ -35,9 +35,9 @@
                 "name": "learning_rate",
                 "type": "float",
                 "label": "Learning rate",
-                "defaultValue": 0.00001,
-                "minimum": 0.000005,
-                "maximum": 0.001,
+                "defaultValue": 0.0002,
+                "minimum": 0.00001,
+                "maximum": 0.1,
                 "category": "training"
             }
         ]
