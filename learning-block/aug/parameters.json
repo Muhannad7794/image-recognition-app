@@ -93,7 +93,7 @@
                 "name": "warmup_epochs",
                 "type": "int",
                 "label": "Warmup epochs",
-                "defaultValue": 12,
+                "defaultValue": 20,
                 "minimum": 1,
                 "category": "training"
             },
@@ -135,9 +135,9 @@
                 "name": "finetune_learning_rate",
                 "type": "float",
                 "label": "Fine-tune learning rate",
-                "defaultValue": 5e-6,
+                "defaultValue": 1e-5,
                 "minimum": 1e-6,
-                "maximum": 1e-5,
+                "maximum": 2e-5,
                 "category": "training"
             },
             {
@@ -153,7 +153,7 @@
                 "name": "early_stopping_patience",
                 "type": "int",
                 "label": "Early stopping patience (val_loss)",
-                "defaultValue": 12,
+                "defaultValue": 15,
                 "minimum": 1,
                 "maximum": 50,
                 "category": "training"
@@ -205,7 +205,7 @@
                 "name": "mixup_alpha",
                 "type": "float",
                 "label": "MixUp alpha",
-                "defaultValue": 0.2,
+                "defaultValue": 0.1,
                 "minimum": 0.1,
                 "maximum": 0.4,
                 "category": "augmentation"
@@ -214,7 +214,7 @@
                 "name": "cutmix_alpha",
                 "type": "float",
                 "label": "CutMix alpha",
-                "defaultValue": 0.2,
+                "defaultValue": 0.1,
                 "minimum": 0.1,
                 "maximum": 0.3,
                 "category": "augmentation"
