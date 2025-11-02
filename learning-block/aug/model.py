@@ -602,41 +602,27 @@ def with_mixups(ds):
 
 
 # -------------------- Augmentation builder --------------------
-def make_augment(strength: float):
-    aug_layers = []
-    if HP["use_random_flip"]:
-        aug_layers.append(layers.RandomFlip("horizontal"))
-        print("[AUG] Enabling RandomFlip")
+aug_layers = []
 
-    if HP["random_rotation_factor"] and HP["random_rotation_factor"] > 0.0:
-        aug_layers.append(
-            layers.RandomRotation(
-                factor=HP["random_rotation_factor"], fill_mode="reflect"
-            )
-        )
-        print(f"[AUG] Enabling RandomRotation (factor={HP['random_rotation_factor']})")
+if HP["use_random_flip"]:
+    aug_layers.append(layers.RandomFlip("horizontal"))
+    print("[AUG] Enabling RandomFlip")
 
-    if HP["random_zoom_factor"] and HP["random_zoom_factor"] > 0.0:
-        aug_layers.append(
-            layers.RandomZoom(
-                height_factor=HP["random_zoom_factor"], fill_mode="reflect"
-            )
-        )
-        print(f"[AUG] Enabling RandomZoom (factor={HP['random_zoom_factor']})")
+if HP["random_rotation_factor"] and HP["random_rotation_factor"] > 0.0:
+    aug_layers.append(layers.RandomRotation(HP["random_rotation_factor"]))
+    print(f"[AUG] Enabling RandomRotation (factor={HP['random_rotation_factor']})")
 
-    if HP["random_contrast_factor"] and HP["random_contrast_factor"] > 0.0:
-        aug_layers.append(layers.RandomContrast(factor=HP["random_contrast_factor"]))
-        print(f"[AUG] Enabling RandomContrast (factor={HP['random_contrast_factor']})")
+if HP["random_zoom_factor"] and HP["random_zoom_factor"] > 0.0:
+    aug_layers.append(layers.RandomZoom(HP["random_zoom_factor"]))
+    print(f"[AUG] Enabling RandomZoom (factor={HP['random_zoom_factor']})")
 
-    if not aug_layers:
-        print("[AUG] No augmentation layers enabled; using Identity.")
-        return layers.Lambda(lambda x: x, name="identity_augment")
-    return keras.Sequential(aug_layers, name="data_augment")
+if HP["random_contrast_factor"] and HP["random_contrast_factor"] > 0.0:
+    aug_layers.append(layers.RandomContrast(HP["random_contrast_factor"]))
+    print(f"[AUG] Enabling RandomContrast (factor={HP['random_contrast_factor']})")
 
 
 # -------------------- Build model --------------------
-augment = make_augment(HP["augment_strength"])
-print(f"[FT] Augmentation: {augment.name}")
+augment = keras.Sequential(aug_layers, name="augment")
 
 # -----Define model's inputs -------
 inputs = layers.Input(shape=INPUT_SHAPE, name="image_input")

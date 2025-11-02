@@ -53,9 +53,9 @@
                 "name": "fine_tune_start_lr",
                 "type": "float",
                 "label": "Finetune start LR (cosine decay)",
-                "defaultValue": 5e-6,
-                "minimum": 1e-6,
-                "maximum": 1e-5,
+                "defaultValue": 0.00001,
+                "minimum": 0.000001,
+                "maximum": 0.01,
                 "category": "training"
             },
             {
@@ -123,7 +123,7 @@
                 "name": "augment_strength",
                 "type": "choice",
                 "label": "Augmentation strength",
-                "defaultValue": "medium",
+                "defaultValue": "strong",
                 "options": [
                     "off",
                     "light",
