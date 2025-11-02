@@ -144,9 +144,9 @@
                 "name": "finetune_weight_decay",
                 "type": "float",
                 "label": "Fine-tune weight decay",
-                "defaultValue": 5e-6,
-                "minimum": 1e-6,
-                "maximum": 2e-5,
+                "defaultValue": 2e-5,
+                "minimum": 1e-5,
+                "maximum": 2e-4,
                 "category": "training"
             },
             {
@@ -168,16 +168,37 @@
                 "category": "training"
             },
             {
-                "name": "augment_strength",
-                "type": "choice",
-                "label": "Augmentation strength",
-                "defaultValue": "medium",
-                "options": [
-                    "off",
-                    "light",
-                    "medium",
-                    "strong"
-                ],
+                "name": "use_random_flip",
+                "type": "bool",
+                "label": "Use Random Horizontal Flip",
+                "defaultValue": true,
+                "category": "augmentation"
+            },
+            {
+                "name": "random_rotation_factor",
+                "type": "float",
+                "label": "Random Rotation Factor (e.g., 0.05)",
+                "defaultValue": 0.05,
+                "minimum": 0.0,
+                "maximum": 0.5,
+                "category": "augmentation"
+            },
+            {
+                "name": "random_zoom_factor",
+                "type": "float",
+                "label": "Random Zoom Factor (e.g., 0.1)",
+                "defaultValue": 0.1,
+                "minimum": 0.0,
+                "maximum": 0.5,
+                "category": "augmentation"
+            },
+            {
+                "name": "random_contrast_factor",
+                "type": "float",
+                "label": "Random Contrast Factor (e.g., 0.1)",
+                "defaultValue": 0.1,
+                "minimum": 0.0,
+                "maximum": 0.5,
                 "category": "augmentation"
             },
             {

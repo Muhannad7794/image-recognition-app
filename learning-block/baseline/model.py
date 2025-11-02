@@ -191,7 +191,7 @@ model.summary()
 history_finetune = model.fit(
     x_train,
     y_train,
-    epochs=args.epochs + 20,
+    epochs=args.epochs + 40,
     initial_epoch=args.epochs,
     validation_data=(x_validate, y_validate),
     batch_size=64,

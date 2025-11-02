@@ -31,8 +31,6 @@ p.add_argument(
 p.add_argument(
     "--use-class-weights", "--use_class_weights", dest="use_class_weights", type=str
 )
-p.add_argument("--mixup-alpha", "--mixup_alpha", dest="mixup_alpha", type=float)
-p.add_argument("--cutmix-alpha", "--cutmix_alpha", dest="cutmix_alpha", type=float)
 p.add_argument(
     "--early-stopping-patience",
     "--early_stopping_patience",
@@ -79,9 +77,30 @@ p.add_argument(
     dest="finetune_unfreeze_pct",
     type=float,
 )
+# Augmentation params
 p.add_argument(
-    "--augment-strength", "--augment_strength", dest="augment_strength", type=str
+    "--use-random-flip", "--use_random_flip", dest="use_random_flip", type=bool
 )
+p.add_argument(
+    "--random-rotation-factor",
+    "--random_rotation_factor",
+    dest="random_rotation_factor",
+    type=float,
+)
+p.add_argument(
+    "--random-zoom-factor",
+    "--random_zoom_factor",
+    dest="random_zoom_factor",
+    type=float,
+)
+p.add_argument(
+    "--random-contrast-factor",
+    "--random_contrast_factor",
+    dest="random_contrast_factor",
+    type=float,
+)
+p.add_argument("--mixup-alpha", "--mixup_alpha", dest="mixup_alpha", type=float)
+p.add_argument("--cutmix-alpha", "--cutmix_alpha", dest="cutmix_alpha", type=float)
 
 args, _ = p.parse_known_args()
 print("[DBG] sys.argv =", sys.argv)
@@ -162,7 +181,11 @@ for k in [
     "warmup_weight_decay",
     "finetune_weight_decay",
     "finetune_unfreeze_pct",
-    "augment_strength",
+    # AUG params
+    "use_random_flip",
+    "random_rotation_factor",
+    "random_zoom_factor",
+    "random_contrast_factor",
 ]:
     v = getattr(args, k, None)
     if v is not None:
@@ -228,11 +251,10 @@ HP = {
     "finetune_weight_decay": as_float(cfg.get("finetune_weight_decay")),
     "finetune_unfreeze_pct": as_float(cfg.get("finetune_unfreeze_pct"))
     or as_float(cfg.get("unfreeze_pct")),
-    "augment_strength": (
-        str(cfg.get("augment_strength"))
-        if cfg.get("augment_strength") is not None
-        else "medium"
-    ).lower(),
+    "use_random_flip": as_bool(cfg.get("use_random_flip")),
+    "random_rotation_factor": as_float(cfg.get("random_rotation_factor")),
+    "random_zoom_factor": as_float(cfg.get("random_zoom_factor")),
+    "random_contrast_factor": as_float(cfg.get("random_contrast_factor")),
 }
 
 # Required args:
@@ -579,42 +601,38 @@ def with_mixups(ds):
     return ds.map(_aug, num_parallel_calls=tf.data.AUTOTUNE)
 
 
-# -------------------- Augmentation by strength --------------------
-def make_augment(strength: str) -> keras.Sequential:
-    s = (strength or "medium").lower()
-    if s == "off":
-        return keras.Sequential([], name="augment_off")
-    if s == "light":
-        return keras.Sequential(
-            [
-                layers.RandomFlip("horizontal"),
-                layers.RandomRotation(0.05),
-                layers.RandomContrast(0.10),
-            ],
-            name="augment_light",
+# -------------------- Augmentation builder --------------------
+def make_augment(strength: float):
+    aug_layers = []
+    if HP["use_random_flip"]:
+        aug_layers.append(layers.RandomFlip("horizontal"))
+        print("[AUG] Enabling RandomFlip")
+
+    if HP["random_rotation_factor"] and HP["random_rotation_factor"] > 0.0:
+        aug_layers.append(
+            layers.RandomRotation(
+                factor=HP["random_rotation_factor"], fill_mode="reflect"
+            )
         )
-    if s == "strong":
-        return keras.Sequential(
-            [
-                layers.RandomFlip("horizontal"),
-                layers.RandomRotation(0.20),
-                layers.RandomZoom(0.25),
-                layers.RandomTranslation(0.15, 0.15),
-                layers.RandomContrast(0.35),
-            ],
-            name="augment_strong",
+        print(f"[AUG] Enabling RandomRotation (factor={HP['random_rotation_factor']})")
+
+    if HP["random_zoom_factor"] and HP["random_zoom_factor"] > 0.0:
+        aug_layers.append(
+            layers.RandomZoom(
+                height_factor=HP["random_zoom_factor"], fill_mode="reflect"
+            )
         )
-    # default "medium"
-    return keras.Sequential(
-        [
-            layers.RandomFlip("horizontal"),
-            layers.RandomRotation(0.10),
-            layers.RandomZoom(0.15),
-            layers.RandomTranslation(0.10, 0.10),
-            layers.RandomContrast(0.20),
-        ],
-        name="augment_medium",
-    )
+        print(f"[AUG] Enabling RandomZoom (factor={HP['random_zoom_factor']})")
+
+    if HP["random_contrast_factor"] and HP["random_contrast_factor"] > 0.0:
+        aug_layers.append(layers.RandomContrast(factor=HP["random_contrast_factor"]))
+        print(f"[AUG] Enabling RandomContrast (factor={HP['random_contrast_factor']})")
+
+    if not aug_layers:
+        print("[AUG] No augmentation layers enabled; using Identity.")
+        return layers.Lambda(lambda x: x, name="identity_augment")
+    return keras.Sequential(aug_layers, name="data_augment")
+
 
 # -------------------- Build model --------------------
 augment = make_augment(HP["augment_strength"])
