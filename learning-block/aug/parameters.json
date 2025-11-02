@@ -49,7 +49,7 @@
                 "name": "learning_rate",
                 "type": "float",
                 "label": "Base learning rate",
-                "defaultValue": 0.0001,
+                "defaultValue": 0.00005,
                 "minimum": 0.0001,
                 "maximum": 0.1,
                 "category": "training"
@@ -58,7 +58,7 @@
                 "name": "warmup_learning_rate",
                 "type": "float",
                 "label": "Warmup learning rate",
-                "defaultValue": 0.0001,
+                "defaultValue": 0.00005,
                 "minimum": 0.0001,
                 "maximum": 0.1,
                 "category": "training"
@@ -67,9 +67,9 @@
                 "name": "finetune_learning_rate",
                 "type": "float",
                 "label": "Fine-tune learning rate",
-                "defaultValue": 0.00001,
+                "defaultValue": 0.000005,
                 "minimum": 0.000001,
-                "maximum": 0.1,
+                "maximum": 0.01,
                 "category": "training"
             },
             {
@@ -92,7 +92,7 @@
                 "name": "warmup_weight_decay",
                 "type": "float",
                 "label": "Warmup weight decay",
-                "defaultValue": 0.0001,
+                "defaultValue": 0.00005,
                 "minimum": 0.0001,
                 "maximum": 0.001,
                 "category": "training"
@@ -101,8 +101,8 @@
                 "name": "finetune_weight_decay",
                 "type": "float",
                 "label": "Fine-tune weight decay",
-                "defaultValue": 0.00001,
-                "minimum": 0.00001,
+                "defaultValue": 0.000005,
+                "minimum": 0.000001,
                 "maximum": 0.0001,
                 "category": "training"
             },
@@ -110,8 +110,8 @@
                 "name": "weight_decay",
                 "type": "float",
                 "label": "fallback weight decay",
-                "defaultValue": 0.00001,
-                "minimum": 0.00001,
+                "defaultValue": 0.000005,
+                "minimum": 0.000001,
                 "maximum": 0.0001,
                 "category": "training"
             },
@@ -128,7 +128,7 @@
                 "name": "finetune_unfreeze_pct",
                 "type": "float",
                 "label": "Fine-tune unfreeze percentage (0-1)",
-                "defaultValue": 0.75,
+                "defaultValue": 0.85,
                 "minimum": 0.0,
                 "maximum": 1.0,
                 "category": "training"

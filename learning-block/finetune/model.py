@@ -413,19 +413,23 @@ else:
     )
     print("[FT] Using ImageNet MobileNetV2 weights")
 
-# Warmup: backbone frozen, BN in inference mode
-base.trainable = False
+# -----Define model's Head -------
+base.trainable = False  # Freeze base model for warmup
 x = base(x, training=False)
-# --- head (NO L2 on Dense; AdamW will handle weight decay if enabled) ---
 x = layers.GlobalAveragePooling2D(name="gap")(x)
 x = layers.Dropout(0.3, name="dropout")(x)
-outputs = layers.Dense(NUM_CLASSES, activation="softmax", name="predictions")(x)
+
+# -----Define model's outputs ------
+outputs = layers.Dense(
+    NUM_CLASSES,
+    activation="softmax",
+    kernel_regularizer=keras.regularizers.l2(HP["weight_decay"]),
+    name="predictions",
+)(x)
 model = keras.Model(inputs, outputs)
 
 # Loss & metrics
-loss = keras.losses.CategoricalCrossentropy(
-    label_smoothing=(HP["label_smoothing"] or 0.0)
-)
+loss = keras.losses.CategoricalCrossentropy(label_smoothing=(HP["label_smoothing"]))
 metrics = [
     keras.metrics.CategoricalAccuracy(name="acc"),
     keras.metrics.TopKCategoricalAccuracy(k=5, name="top5"),
