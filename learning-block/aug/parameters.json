@@ -135,9 +135,9 @@
                 "name": "finetune_learning_rate",
                 "type": "float",
                 "label": "Fine-tune learning rate",
-                "defaultValue": 1e-5,
-                "minimum": 1e-6,
-                "maximum": 2e-5,
+                "defaultValue": 2e-5,
+                "minimum": 1e-5,
+                "maximum": 3e-5,
                 "category": "training"
             },
             {
@@ -205,7 +205,7 @@
                 "name": "mixup_alpha",
                 "type": "float",
                 "label": "MixUp alpha",
-                "defaultValue": 0.1,
+                "defaultValue": 0.2,
                 "minimum": 0.1,
                 "maximum": 0.4,
                 "category": "augmentation"
@@ -214,7 +214,7 @@
                 "name": "cutmix_alpha",
                 "type": "float",
                 "label": "CutMix alpha",
-                "defaultValue": 0.1,
+                "defaultValue": 0.2,
                 "minimum": 0.1,
                 "maximum": 0.3,
                 "category": "augmentation"
