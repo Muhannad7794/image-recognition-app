@@ -79,6 +79,31 @@ p.add_argument(
     dest="finetune_unfreeze_pct",
     type=float,
 )
+# Augmentation args
+p.add_argument(
+    "--use-random-flip",
+    "--use_random_flip",
+    dest="use_random_flip",
+    type=bool,
+)
+p.add_argument(
+    "--random-rotation-factor",
+    "--random_rotation_factor",
+    dest="random_rotation_factor",
+    type=float,
+)
+p.add_argument(
+    "--random-zoom-factor",
+    "--random_zoom_factor",
+    dest="random_zoom_factor",
+    type=float,
+)
+p.add_argument(
+    "--random-contrast-factor",
+    "--random_contrast_factor",
+    dest="random_contrast_factor",
+    type=float,
+)
 
 args, _ = p.parse_known_args()
 print("[DBG] sys.argv =", sys.argv)
@@ -159,6 +184,11 @@ for k in [
     "warmup_weight_decay",
     "finetune_weight_decay",
     "finetune_unfreeze_pct",
+    # Augmentation args
+    "use_random_flip",
+    "random_rotation_factor",
+    "random_zoom_factor",
+    "random_contrast_factor",
 ]:
     v = getattr(args, k, None)
     if v is not None:
@@ -224,6 +254,11 @@ HP = {
     "finetune_weight_decay": as_float(cfg.get("finetune_weight_decay")),
     "finetune_unfreeze_pct": as_float(cfg.get("finetune_unfreeze_pct"))
     or as_float(cfg.get("unfreeze_pct")),
+    # Augmentation args
+    "use_random_flip": as_bool(cfg.get("use_random_flip")),
+    "random_rotation_factor": as_float(cfg.get("random_rotation_factor")),
+    "random_zoom_factor": as_float(cfg.get("random_zoom_factor")),
+    "random_contrast_factor": as_float(cfg.get("random_contrast_factor")),
 }
 
 # Required args:
@@ -495,7 +530,7 @@ def make_optimizer(name: str, lr: float, wd: float | None):
     return keras.optimizers.Adam(learning_rate=lr)
 
 
-# -------------------- Optional MixUp/CutMix (fine-tune only) --------------------
+# --------------------  MixUp/CutMix (fine-tune only) --------------------
 def _sample_beta(alpha, shape):
     if alpha <= 0.0:
         return tf.ones(shape)
@@ -570,16 +605,26 @@ def with_mixups(ds):
     return ds.map(_aug, num_parallel_calls=tf.data.AUTOTUNE)
 
 
+# -------------------- Augmentation block----------------
+aug_layers = []
+if HP["use_random_flip"]:
+    aug_layers.append(layers.RandomFlip("horizontal"))
+
+if HP["random_rotation_factor"] and HP["random_rotation_factor"] > 0.0:
+    aug_layers.append(layers.RandomRotation(HP["random_rotation_factor"]))
+    print(f"[AUG] Enabling RandomRotation (factor={HP['random_rotation_factor']})")
+
+if HP["random_zoom_factor"] and HP["random_zoom_factor"] > 0.0:
+    aug_layers.append(layers.RandomZoom(HP["random_zoom_factor"]))
+    print(f"[AUG] Enabling RandomZoom (factor={HP['random_zoom_factor']})")
+
+if HP["random_contrast_factor"] and HP["random_contrast_factor"] > 0.0:
+    aug_layers.append(layers.RandomContrast(HP["random_contrast_factor"]))
+    print(f"[AUG] Enabling RandomContrast (factor={HP['random_contrast_factor']})")
+
+
 # -------------------- Model --------------------
-augment = keras.Sequential(
-    [
-        layers.RandomFlip("horizontal"),
-        layers.RandomRotation(0.05),
-        layers.RandomZoom(0.10),
-        layers.RandomContrast(0.10),
-    ],
-    name="augment",
-)
+augment = keras.Sequential(aug_layers, name="augment")
 
 # -----Define model's inputs -------
 inputs = layers.Input(shape=INPUT_SHAPE, name="image_input")
@@ -602,7 +647,7 @@ else:
     print("[AUG] Using ImageNet MobileNetV2 weights")
 
 # -----Define model's Head -------
-base.trainable = False # Freeze base model
+base.trainable = False  # Freeze base model
 x = base(x, training=False)
 x = layers.GlobalAveragePooling2D(name="gap")(x)
 x = layers.Dropout(0.3, name="dropout")(x)
@@ -661,7 +706,7 @@ print(f"[DBG] Warmup TR : {dict(zip(model.metrics_names, eval_warm_tr))}")
 
 
 # -------------------- Phase 2: Fine-tune (Unfreeze backbone) --------------------
-base.trainable = True # Unfreeze base model
+base.trainable = True  # Unfreeze base model
 
 cutoff, n_layers = set_finetune_trainable(base, HP["finetune_unfreeze_pct"])
 print(

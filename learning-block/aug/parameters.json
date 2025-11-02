@@ -27,7 +27,7 @@
                 "name": "epochs",
                 "type": "int",
                 "label": "Number of epochs",
-                "defaultValue": 60,
+                "defaultValue": 150,
                 "minimum": 1,
                 "category": "training"
             },
@@ -39,98 +39,36 @@
                 "category": "training"
             },
             {
-                "name": "finetune_optimizer",
-                "type": "string",
-                "label": "Fine-tune Optimizer",
-                "defaultValue": "adam",
+                "name": "batch_size",
+                "type": "int",
+                "label": "Batch size",
+                "defaultValue": 32,
+                "minimum": 8,
                 "category": "training"
             },
             {
                 "name": "learning_rate",
                 "type": "float",
                 "label": "Base learning rate",
-                "defaultValue": 0.00005,
-                "minimum": 0.0001,
+                "defaultValue": 0.0001,
+                "minimum": 0.00001,
                 "maximum": 0.1,
                 "category": "training"
             },
             {
-                "name": "warmup_learning_rate",
-                "type": "float",
-                "label": "Warmup learning rate",
-                "defaultValue": 0.00005,
-                "minimum": 0.0001,
-                "maximum": 0.1,
-                "category": "training"
-            },
-            {
-                "name": "finetune_learning_rate",
-                "type": "float",
-                "label": "Fine-tune learning rate",
-                "defaultValue": 0.000005,
-                "minimum": 0.000001,
-                "maximum": 0.01,
-                "category": "training"
-            },
-            {
-                "name": "batch_size",
-                "type": "int",
-                "label": "Batch size",
-                "defaultValue": 64,
-                "minimum": 8,
-                "category": "training"
-            },
-            {
-                "name": "warmup_epochs",
-                "type": "int",
-                "label": "Warmup epochs",
-                "defaultValue": 12,
-                "minimum": 1,
-                "category": "training"
-            },
-            {
-                "name": "warmup_weight_decay",
-                "type": "float",
-                "label": "Warmup weight decay",
-                "defaultValue": 0.00005,
-                "minimum": 0.0001,
-                "maximum": 0.001,
-                "category": "training"
-            },
-            {
-                "name": "finetune_weight_decay",
-                "type": "float",
-                "label": "Fine-tune weight decay",
-                "defaultValue": 0.000005,
-                "minimum": 0.000001,
-                "maximum": 0.0001,
+                "name": "use_class_weights",
+                "type": "bool",
+                "label": "Use class weights",
+                "defaultValue": true,
                 "category": "training"
             },
             {
                 "name": "weight_decay",
                 "type": "float",
-                "label": "fallback weight decay",
+                "label": "Base weight decay",
                 "defaultValue": 0.000005,
                 "minimum": 0.000001,
                 "maximum": 0.0001,
-                "category": "training"
-            },
-            {
-                "name": "unfreeze_pct",
-                "type": "float",
-                "label": "Backbone unfreeze percentage (0-1)",
-                "defaultValue": 0.50,
-                "minimum": 0.0,
-                "maximum": 1.0,
-                "category": "training"
-            },
-            {
-                "name": "finetune_unfreeze_pct",
-                "type": "float",
-                "label": "Fine-tune unfreeze percentage (0-1)",
-                "defaultValue": 0.85,
-                "minimum": 0.0,
-                "maximum": 1.0,
                 "category": "training"
             },
             {
@@ -143,29 +81,73 @@
                 "category": "training"
             },
             {
-                "name": "use_class_weights",
-                "type": "bool",
-                "label": "Use class weights",
-                "defaultValue": true,
+                "name": "unfreeze_pct",
+                "type": "float",
+                "label": "Base unfreeze percentage (0-1)",
+                "defaultValue": 0.25,
+                "minimum": 0.0,
+                "maximum": 1.0,
                 "category": "training"
             },
             {
-                "name": "mixup_alpha",
-                "type": "float",
-                "label": "MixUp alpha",
-                "defaultValue": 0.2,
-                "minimum": 0.1,
-                "maximum": 0.4,
-                "category": "augmentation"
+                "name": "warmup_epochs",
+                "type": "int",
+                "label": "Warmup epochs",
+                "defaultValue": 12,
+                "minimum": 1,
+                "category": "training"
             },
             {
-                "name": "cutmix_alpha",
+                "name": "warmup_learning_rate",
                 "type": "float",
-                "label": "CutMix alpha",
-                "defaultValue": 0.2,
-                "minimum": 0.1,
-                "maximum": 0.3,
-                "category": "augmentation"
+                "label": "Warmup learning rate",
+                "defaultValue": 5e-4,
+                "minimum": 1e-4,
+                "maximum": 1e-3,
+                "category": "training"
+            },
+            {
+                "name": "warmup_weight_decay",
+                "type": "float",
+                "label": "Warmup weight decay",
+                "defaultValue": 5e-5,
+                "minimum": 1e-5,
+                "maximum": 1e-3,
+                "category": "training"
+            },
+            {
+                "name": "finetune_unfreeze_pct",
+                "type": "float",
+                "label": "Fine-tune unfreeze percentage (0-1)",
+                "defaultValue": 0.50,
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "category": "training"
+            },
+            {
+                "name": "finetune_optimizer",
+                "type": "string",
+                "label": "Fine-tune Optimizer",
+                "defaultValue": "adam",
+                "category": "training"
+            },
+            {
+                "name": "finetune_learning_rate",
+                "type": "float",
+                "label": "Fine-tune learning rate",
+                "defaultValue": 3e-5,
+                "minimum": 1e-5,
+                "maximum": 1e-4,
+                "category": "training"
+            },
+            {
+                "name": "finetune_weight_decay",
+                "type": "float",
+                "label": "Fine-tune weight decay",
+                "defaultValue": 5e-6,
+                "minimum": 1e-6,
+                "maximum": 2e-5,
+                "category": "training"
             },
             {
                 "name": "early_stopping_patience",
@@ -184,6 +166,58 @@
                 "minimum": 0.0,
                 "maximum": 0.1,
                 "category": "training"
+            },
+            {
+                "name": "use_random_flip",
+                "type": "bool",
+                "label": "Use Random Horizontal Flip",
+                "defaultValue": true,
+                "category": "augmentation"
+            },
+            {
+                "name": "random_rotation_factor",
+                "type": "float",
+                "label": "Random Rotation Factor",
+                "defaultValue": 0.05,
+                "minimum": 0.0,
+                "maximum": 0.5,
+                "category": "augmentation"
+            },
+            {
+                "name": "random_zoom_factor",
+                "type": "float",
+                "label": "Random Zoom Factor",
+                "defaultValue": 0.1,
+                "minimum": 0.0,
+                "maximum": 0.5,
+                "category": "augmentation"
+            },
+            {
+                "name": "random_contrast_factor",
+                "type": "float",
+                "label": "Random Contrast Factor",
+                "defaultValue": 0.1,
+                "minimum": 0.0,
+                "maximum": 0.5,
+                "category": "augmentation"
+            },
+            {
+                "name": "mixup_alpha",
+                "type": "float",
+                "label": "MixUp alpha",
+                "defaultValue": 0.2,
+                "minimum": 0.1,
+                "maximum": 0.4,
+                "category": "augmentation"
+            },
+            {
+                "name": "cutmix_alpha",
+                "type": "float",
+                "label": "CutMix alpha",
+                "defaultValue": 0.2,
+                "minimum": 0.1,
+                "maximum": 0.3,
+                "category": "augmentation"
             }
         ]
     }

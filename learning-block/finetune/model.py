@@ -484,9 +484,8 @@ print(f"[DBG] Warmup VAL: {dict(zip(model.metrics_names, eval_warm_val))}")
 print(f"[DBG] Warmup TR : {dict(zip(model.metrics_names, eval_warm_tr))}")
 
 
-# -------------------- Phase 2: Finetune (unfreeze fraction; BN frozen) --------------------
-# Allow per-layer flags to take effect in Phase-2
-base.trainable = True
+# -------------------- Phase 2: Finetune --------------------
+base.trainable = True # Unfreeze base model for finetune
 
 cutoff, n_layers = set_finetune_trainable_fraction(base, HP["fine_tune_fraction"])
 print(

@@ -27,7 +27,7 @@
                 "name": "epochs",
                 "type": "int",
                 "label": "Total epochs (warmup + finetune)",
-                "defaultValue": 60,
+                "defaultValue": 150,
                 "minimum": 5,
                 "category": "training"
             },
@@ -71,7 +71,7 @@
                 "name": "fine_tune_fraction",
                 "type": "float",
                 "label": "Unfreeze fraction of backbone (0–1, 1=all)",
-                "defaultValue": 1.0,
+                "defaultValue": 0.75,
                 "minimum": 0.1,
                 "maximum": 1.0,
                 "category": "training"
@@ -80,7 +80,7 @@
                 "name": "batch_size",
                 "type": "int",
                 "label": "Batch size",
-                "defaultValue": 64,
+                "defaultValue": 32,
                 "minimum": 8,
                 "maximum": 256,
                 "category": "resources"
