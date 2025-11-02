@@ -119,7 +119,7 @@
                 "name": "finetune_unfreeze_pct",
                 "type": "float",
                 "label": "Fine-tune unfreeze percentage (0-1)",
-                "defaultValue": 0.50,
+                "defaultValue": 0.90,
                 "minimum": 0.0,
                 "maximum": 1.0,
                 "category": "training"
@@ -135,9 +135,9 @@
                 "name": "finetune_learning_rate",
                 "type": "float",
                 "label": "Fine-tune learning rate",
-                "defaultValue": 3e-5,
-                "minimum": 1e-5,
-                "maximum": 1e-4,
+                "defaultValue": 5e-6,
+                "minimum": 1e-6,
+                "maximum": 1e-5,
                 "category": "training"
             },
             {
@@ -168,37 +168,16 @@
                 "category": "training"
             },
             {
-                "name": "use_random_flip",
-                "type": "bool",
-                "label": "Use Random Horizontal Flip",
-                "defaultValue": true,
-                "category": "augmentation"
-            },
-            {
-                "name": "random_rotation_factor",
-                "type": "float",
-                "label": "Random Rotation Factor",
-                "defaultValue": 0.05,
-                "minimum": 0.0,
-                "maximum": 0.5,
-                "category": "augmentation"
-            },
-            {
-                "name": "random_zoom_factor",
-                "type": "float",
-                "label": "Random Zoom Factor",
-                "defaultValue": 0.1,
-                "minimum": 0.0,
-                "maximum": 0.5,
-                "category": "augmentation"
-            },
-            {
-                "name": "random_contrast_factor",
-                "type": "float",
-                "label": "Random Contrast Factor",
-                "defaultValue": 0.1,
-                "minimum": 0.0,
-                "maximum": 0.5,
+                "name": "augment_strength",
+                "type": "choice",
+                "label": "Augmentation strength",
+                "defaultValue": "medium",
+                "options": [
+                    "off",
+                    "light",
+                    "medium",
+                    "strong"
+                ],
                 "category": "augmentation"
             },
             {
