@@ -98,8 +98,8 @@ def generate_features(
 
     # ---- Output size & channels (contract to model) ----
     # accept both snake_case and kebab-case keys
-    Wt = _as_int("img_width", kwargs.get("img_width", kwargs.get("img-width", 160)))
-    Ht = _as_int("img_height", kwargs.get("img_height", kwargs.get("img-height", 160)))
+    Wt = _as_int("img_width", kwargs.get("img_width", kwargs.get("img-width", 96)))
+    Ht = _as_int("img_height", kwargs.get("img_height", kwargs.get("img-height", 96)))
     Cout = 3 if int(kwargs.get("out_channels", 3)) == 3 else 1  # sanitize {1,3}
 
     # ---- Flatten incoming buffer ----

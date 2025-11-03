@@ -15,10 +15,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends wget ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# 5) PRE-DOWNLOAD Keras weights (160x160 no-top)
+# 5) PRE-DOWNLOAD Keras weights (96x96 no-top)
 RUN mkdir -p $KERAS_HOME/models && \
-    wget -q https://storage.googleapis.com/tensorflow/keras-applications/mobilenet_v2/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_160_no_top.h5 \
-    -O $KERAS_HOME/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_160_no_top.h5
+    wget -q https://storage.googleapis.com/tensorflow/keras-applications/mobilenet_v2/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5 \
+    -O $KERAS_HOME/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5
 
 # 6) Copy requirements first (for caching)
 COPY requirements.txt .

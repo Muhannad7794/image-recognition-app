@@ -8,9 +8,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import BatchNormalization
 
 # -------------------- Argparse (aliases for underscore/dash) --------------------
-p = argparse.ArgumentParser(
-    description="Fine-tune MobileNetV2 @160x160 (robust loader)"
-)
+p = argparse.ArgumentParser(description="Fine-tune MobileNetV2 @96x96 (robust loader)")
 p.add_argument(
     "--data-directory",
     "--data_directory",
@@ -197,7 +195,7 @@ if HP["fine_tune_fraction"] <= 0 or HP["fine_tune_fraction"] > 1.0:
 print("[HP] Effective hyperparameters:", json.dumps(HP, indent=2, sort_keys=True))
 
 # -------------------- Constants --------------------
-IMG_H, IMG_W, C = 160, 160, 3
+IMG_H, IMG_W, C = 96, 96, 3
 INPUT_SHAPE = (IMG_H, IMG_W, C)
 EXPECTED_FEAT_LEN = IMG_H * IMG_W * C
 
@@ -398,15 +396,15 @@ inputs = layers.Input(shape=INPUT_SHAPE, name="image_input")
 x = augment(inputs)  # augmentation is active during training
 x = rescale_layer(x)  # -> [-1, 1] for MobileNetV2
 
-# Prefer local 160x160 MobileNetV2 weights if present; else "imagenet"
+# Prefer local 96x96 MobileNetV2 weights if present; else "imagenet"
 weights_path = os.path.expanduser(
-    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_160_no_top.h5"
+    "~/.keras/models/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_96_no_top.h5"
 )
 if os.path.exists(weights_path):
     base = keras.applications.MobileNetV2(
         input_shape=INPUT_SHAPE, include_top=False, weights=weights_path
     )
-    print("[FT] Using local 160x160 MobileNetV2 weights")
+    print("[FT] Using local 96x96 MobileNetV2 weights")
 else:
     base = keras.applications.MobileNetV2(
         input_shape=INPUT_SHAPE, include_top=False, weights="imagenet"
@@ -485,7 +483,7 @@ print(f"[DBG] Warmup TR : {dict(zip(model.metrics_names, eval_warm_tr))}")
 
 
 # -------------------- Phase 2: Finetune --------------------
-base.trainable = True # Unfreeze base model for finetune
+base.trainable = True  # Unfreeze base model for finetune
 
 cutoff, n_layers = set_finetune_trainable_fraction(base, HP["fine_tune_fraction"])
 print(
