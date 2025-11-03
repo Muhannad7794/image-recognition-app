@@ -162,7 +162,7 @@
                 "name": "early_stopping_min_delta",
                 "type": "float",
                 "label": "Early stopping min_delta",
-                "defaultValue": 0.01,
+                "defaultValue": 0.0001,
                 "minimum": 0.0,
                 "maximum": 0.1,
                 "category": "training"
