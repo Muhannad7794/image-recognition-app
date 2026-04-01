@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest # Use a standard Linux runner
 
     steps:
-      # Step 1: Check out your repository code
+      # Step 1: Check out the repository code
       - name: Checkout code
         uses: actions/checkout@v4
 
