@@ -1,5 +1,15 @@
 # Step-by-Step Guide: Building and Deploying a Custom Block with Edge Impulse CLI
 
+## Why to Build a Custom Block?
+### The Default Block Limitation
+**Default Behavior:** Edge Impulse’s standard "Image" DSP block flattens 2D/3D data into a 1D array.
+
+**The Conflict:** High-performance models (like those using GlobalAveragePooling2D) require a 3D input shape (H,W,C).
+
+**The Error:** Flattened features detected, but model expects image-like input.
+
+**The Solution** A Custom Dockerized DSP Block that performs OpenCV-based resizing and normalization while preserving the 3D spatial structure via a specific output_config handshake.
+
 ---
 
 ## 1️⃣ Environment Setup
