@@ -19,25 +19,84 @@ npm install -g edge-impulse-cli
 
 Log in to your Edge Impulse account and connect your project:
 
+### Initialize the Block (Login & Project Link)
 ```bash
-# Clear old sessions
+edge-impulse-blocks init
+```
+**Wizard Selections:**
+
+***Login:*** Enter your email and password if prompted.
+
+***Owner:*** Select your username or organization.
+
+***Type:*** Choose DSP block.
+
+***Action:*** Choose Create a new block.
+
+***Name:*** Enter OpenCV Preprocessor.
+
+***Description:*** Enter 3D Image Preprocessor for CNNs.
+
+This creates a hidden .ei-block-config file. This file contains the unique id and organizationId needed for the CI/CD pipeline. Commit this file to your repo.
+
+### Clear old sessions
+```bash
 edge-impulse-blocks --clean
-# log in to Edge Impulse
+```
+### log in to Edge Impulse
+```bash
 edge-impulse-login
-# List your projects to get the project ID
+```
+### List your projects to get the project ID
+```bash
 edge-impulse-projects
+```
+### Connect to your project using the project ID
+```bash
 edge-impulse-connect <project-id>
 ```
 
 ## 3️⃣ Build and Push the the Custom Block
 
-From the root of the repository, execute the push command. The CLI will automatically detect the Dockerfile, build the image locally to verify it, and then push it to the Edge Impulse registry.
+### Building and Pushing (Manual Test)
+Before trusting the automation, run a manual push to verify the Docker build:
 
 ```bash
 edge-impulse-blocks --push
 ```
 
-OR, use the GitHub action workflow to automate the pocess on every push to the chosen branch.
+### Setting up GitHub Actions CI/CD
+**A. Add Repository Secrets**
+
+- Go to your GitHub Repo > Settings > Secrets and variables > Actions.
+
+- Add a new secret:
+
+  - Name: EI_API_KEY
+
+  - Value: (Find this in Edge Impulse Studio > Dashboard > Keys)
+
+**B. The CI/CD Workflow**
+
+Ensure your .github/workflows/deploy.yml looks like this:
+
+```yaml
+name: Deploy DSP Block
+on:
+  push:
+    branches: [ main ]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      - run: npm install -g edge-impulse-cli
+      - run: edge-impulse-blocks push --api-key ${{ secrets.EI_API_KEY }}
+```
+Once the code is ready, push the changes to GitHub:
 
 ```bash
 git push
